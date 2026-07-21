@@ -302,7 +302,16 @@ async def process_image_local(file: UploadFile = File(...)):
     return await _process(file)
 
 
+BUILD_MARKER = "2026-07-21-r2"  # bumped per deploy to verify rollouts
+
+
 @app.get("/api/health")
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/version")
+@app.get("/version")
+def version():
+    return {"build": BUILD_MARKER}
