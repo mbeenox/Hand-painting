@@ -1,0 +1,9 @@
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.vercel/
+preview_*.png
+e2e_*.png
+test_input.png
+drawing_*.png

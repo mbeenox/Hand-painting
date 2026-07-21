@@ -1,0 +1,4 @@
+backend/
+e2e_test.py
+*.png
+frontend/node_modules
