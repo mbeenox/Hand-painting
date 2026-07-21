@@ -1,0 +1,10 @@
+# Root requirements — used by VERCEL for the api/index.py serverless
+# function. Kept deliberately minimal: numpy + opencv must fit (with the
+# runtime itself) inside Vercel's 250 MB unpacked function limit, which is
+# why SciPy/networkx are absent here (see api/index.py for the ports).
+#
+# For full-featured LOCAL development use backend/requirements.txt instead.
+fastapi>=0.115
+python-multipart>=0.0.20
+numpy>=2.0
+opencv-python-headless>=4.10
