@@ -1,10 +1,20 @@
-# Root requirements — used by VERCEL for the api/index.py serverless
-# function. Kept deliberately minimal: numpy + opencv must fit (with the
-# runtime itself) inside Vercel's 250 MB unpacked function limit, which is
-# why SciPy/networkx are absent here (see api/index.py for the ports).
+# Root requirements — used by VERCEL for the api/index.py serverless function.
 #
+# These packages are unpacked into the Vercel function bundle, which must fit
+# under the Python function size limit. That limit is 500 MB ONLY when Fluid
+# Compute is enabled (see "fluid": true in vercel.json); on the legacy path it
+# is ~225 MB (250 MB minus the runtime layer), which numpy (~70 MB) + OpenCV
+# (~140 MB) alone already exceed — that mismatch is what broke the build.
+#
+# Versions are PINNED on purpose. Previously these were open-ended (>=), so a
+# fresh build silently resolved newer, larger wheels (opencv 5.x, numpy 2.5)
+# and grew the bundle over the cap. Pinning keeps builds reproducible and the
+# bundle small. Verified end-to-end (full api/index.py pipeline) on Python 3.12.
+# To track newer releases, bump these deliberately and re-check the bundle size.
+#
+# SciPy/networkx are deliberately absent (ported to numpy in api/index.py).
 # For full-featured LOCAL development use backend/requirements.txt instead.
-fastapi>=0.115
-python-multipart>=0.0.20
-numpy>=2.0
-opencv-python-headless>=4.10
+fastapi==0.139.2
+python-multipart==0.0.32
+numpy==2.2.6
+opencv-python-headless==4.11.0.86
