@@ -66,11 +66,11 @@ app.add_middleware(
 # --------------------------------------------------------------------------
 # Tunables
 # --------------------------------------------------------------------------
-MAX_IMAGE_DIM = 640        # downscale large uploads for speed & consistency
-MIN_POINTS, MAX_POINTS = 500, 1000
+MAX_IMAGE_DIM = 720        # downscale large uploads for speed & consistency
+MIN_POINTS, MAX_POINTS = 500, 1300   # in lockstep with api/index.py
 JITTER_SIGMA_PX = 1.6      # std-dev of Gaussian jitter, in pixels
-TWO_OPT_TIME_BUDGET = 1.5  # seconds spent untangling the tour
-SPLINE_OUTPUT_POINTS = 2200  # resolution of the final smoothed polyline
+TWO_OPT_TIME_BUDGET = 2.0  # seconds spent untangling the (denser) tour
+SPLINE_OUTPUT_POINTS = 2800  # resolution of the final smoothed polyline
 SPLINE_SMOOTHING = 2.0     # scipy splprep smoothing factor multiplier
 
 

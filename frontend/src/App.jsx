@@ -17,7 +17,8 @@ import UploadPanel from './components/UploadPanel.jsx';
 import WatercolorSplash from './components/WatercolorSplash.jsx';
 import { processImage } from './api.js';
 
-const DRAW_SECONDS = 20; // total drawing duration (spec: 15–30s)
+const DRAW_SECONDS = 30; // total drawing duration; longer feels less rushed
+                         // and, with the new pacing envelope, lands cleanly.
 
 export default function App() {
   const [phase, setPhase] = useState('idle'); // idle | processing | drawing | done

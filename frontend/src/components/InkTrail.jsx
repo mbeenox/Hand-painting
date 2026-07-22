@@ -20,9 +20,10 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 const INK_COLOR = '#141428'; // near-black blue, micron-pen style
-const MIN_STEP = 0.004;      // world units — skip vertices when pen is idle
+const MIN_STEP = 0.0025;     // world units — skip vertices when pen is idle
+                             // (denser than before → smoother, fuller line)
 
-export default function InkTrail({ penTip, maxPoints = 6000, active }) {
+export default function InkTrail({ penTip, maxPoints = 16000, active }) {
   const lineRefs = [useRef(), useRef(), useRef()];
   const state = useRef({ count: 0, last: new THREE.Vector3(Infinity, 0, 0) });
 

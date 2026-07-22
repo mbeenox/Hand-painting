@@ -58,7 +58,9 @@ export default function Scene({ pathData, duration, active, onComplete }) {
       <directionalLight position={[4, 6, 8]} intensity={1.2} />
       <directionalLight position={[-6, -2, 4]} intensity={0.3} />
 
-      <InkTrail penTip={penTip} maxPoints={6000} active={active} />
+      {/* maxPoints sized so even a 30s draw on a 240Hz display never
+          truncates the line (≈7.2k samples worst case). */}
+      <InkTrail penTip={penTip} maxPoints={16000} active={active} />
       <HandRig penTip={penTip} boardSize={BOARD_SIZE} />
     </>
   );

@@ -51,12 +51,13 @@ app.add_middleware(
 # --------------------------------------------------------------------------
 # Tunables (kept in lockstep with backend/main.py)
 # --------------------------------------------------------------------------
-MAX_IMAGE_DIM = 640
-MIN_POINTS, MAX_POINTS = 500, 1000
-JITTER_SIGMA_PX = 1.6
-TWO_OPT_TIME_BUDGET = 1.2      # slightly tighter: serverless CPU is billed
+MAX_IMAGE_DIM = 720           # a touch more resolution → finer edge detail
+MIN_POINTS, MAX_POINTS = 500, 1300   # denser sampling → the line covers more
+JITTER_SIGMA_PX = 1.6         #   of the image, so it reads as more "complete"
+TWO_OPT_TIME_BUDGET = 2.0     # more uncrossing for the larger point set; still
+                              #   ~seconds, far under the 30s function maxDuration
 CHAIKIN_ROUNDS = 3
-OUTPUT_POINTS = 2200
+OUTPUT_POINTS = 2800          # smoother resampled polyline for the denser tour
 
 
 # ==========================================================================

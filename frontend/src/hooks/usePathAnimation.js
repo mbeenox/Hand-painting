@@ -30,9 +30,21 @@ import * as THREE from 'three';
 
 const CURVE_SLOWDOWN = 3.0; // K: how hard curves brake the pen
 
-// Smootherstep — C2-continuous ease-in-out envelope for start/finish.
-function easeInOut(t) {
-  return t * t * t * (t * (t * 6 - 15) + 10);
+// Global pacing envelope. A gentle ease-IN so the pen starts smoothly, a long
+// constant-speed cruise, then a SHORT ease-OUT so the line finishes with clear
+// intent. The previous symmetric smootherstep spent the last ~15% of the time
+// drawing the last ~1% of the path — the pen crept to a near-stop and the
+// drawing appeared to stall before it was done. This asymmetric trapezoid
+// (velocity ramps up, cruises, ramps briefly down) keeps the pen visibly
+// moving until it lands on the final point.
+const EASE_IN = 0.16;
+const EASE_OUT = 0.06;
+function paceEnvelope(u) {
+  const area = 1 - EASE_IN / 2 - EASE_OUT / 2; // ∫ of the trapezoidal speed
+  if (u < EASE_IN) return (u * u) / (2 * EASE_IN) / area;
+  if (u <= 1 - EASE_OUT) return (EASE_IN / 2 + (u - EASE_IN)) / area;
+  const d = 1 - u;
+  return (area - (d * d) / (2 * EASE_OUT)) / area;
 }
 
 export function usePathAnimation(points, aspect, duration, boardSize = 8) {
@@ -91,8 +103,8 @@ export function usePathAnimation(points, aspect, duration, boardSize = 8) {
     // 5. Runtime sampler: elapsed seconds → world position (binary search).
     // ------------------------------------------------------------------
     function getPoint(elapsed, out) {
-      // Global easing envelope: warp raw time through smootherstep.
-      const t = easeInOut(THREE.MathUtils.clamp(elapsed / duration, 0, 1)) * duration;
+      // Global pacing envelope: warp raw time so the pen cruises and lands.
+      const t = paceEnvelope(THREE.MathUtils.clamp(elapsed / duration, 0, 1)) * duration;
 
       let lo = 0, hi = n - 1;
       while (hi - lo > 1) {
