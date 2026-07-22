@@ -6,7 +6,7 @@ before moving on. Read `CLAUDE.md` first for architecture/deploy context.
 
 ## Recommended sequence (impact ÷ effort)
 
-1. **Shareable export + recording** — highest reach; mostly frontend; low-med risk.
+1. ✅ **Shareable export + recording** — DONE (2026-07-22): PNG + webm/mp4 + Web Share.
 2. **Polish: processing cue, reveal, audio** — cheap, makes the flow feel premium.
 3. **Variable-width ink strokes** — biggest single visual jump.
 4. **User controls / style presets** — builds on #3 (color/weight/speed).

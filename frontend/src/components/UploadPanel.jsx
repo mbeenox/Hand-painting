@@ -12,10 +12,16 @@ const styles = {
   },
   corner: {
     position: 'absolute', top: 16, right: 16, zIndex: 10,
-    display: 'flex', gap: 8,
+    display: 'flex', gap: 8, flexWrap: 'wrap',
+    justifyContent: 'flex-end', maxWidth: '92vw',
   },
   button: {
     padding: '12px 26px', fontSize: 17, fontFamily: 'Georgia, serif',
+    border: '2px solid #1a1a2e', borderRadius: 999, background: '#fff',
+    color: '#1a1a2e', cursor: 'pointer',
+  },
+  compact: {
+    padding: '9px 18px', fontSize: 15, fontFamily: 'Georgia, serif',
     border: '2px solid #1a1a2e', borderRadius: 999, background: '#fff',
     color: '#1a1a2e', cursor: 'pointer',
   },
@@ -25,7 +31,10 @@ const styles = {
   video: { borderRadius: 12, maxWidth: '70vw', maxHeight: '50vh' },
 };
 
-export default function UploadPanel({ phase, error, onImage, onReset }) {
+export default function UploadPanel({
+  phase, error, onImage, onReset,
+  onDownloadImage, onShare, shareSupported, videoUrl, videoExt = 'webm',
+}) {
   const fileRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -77,7 +86,17 @@ export default function UploadPanel({ phase, error, onImage, onReset }) {
   if (phase === 'done') {
     return (
       <div style={styles.corner}>
-        <button style={styles.button} onClick={onReset}>Draw another ↺</button>
+        <button style={styles.compact} onClick={onDownloadImage}>Save image ↓</button>
+        {videoUrl && (
+          <a href={videoUrl} download={`hypnotic-hand.${videoExt}`}
+             style={{ textDecoration: 'none' }}>
+            <button style={styles.compact}>Save video ↓</button>
+          </a>
+        )}
+        {shareSupported && (
+          <button style={styles.compact} onClick={onShare}>Share ↗</button>
+        )}
+        <button style={styles.compact} onClick={onReset}>Draw another ↺</button>
       </div>
     );
   }

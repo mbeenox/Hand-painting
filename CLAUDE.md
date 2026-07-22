@@ -129,10 +129,20 @@ Hard-won deployment facts (do **not** regress):
   for a fuller line: `MAX_POINTS` 1000 → 1300, `OUTPUT_POINTS` 2200 → 2800,
   `MAX_IMAGE_DIM` 640 → 720, 2-opt budget 1.2 → 2.0 s (pipeline ~2.6 s).
 
-## Roadmap — ideas to make it more impressive (not yet done)
+- **Feature #1 — shareable export + recording (2026-07-22)** — the draw is now
+  captured and offered on the done screen as **Save image** (PNG), **Save video**
+  (webm/mp4 of the whole draw), and **Share** (Web Share API, falls back to
+  download). New `hooks/useDrawCapture.js` composites paper + the rasterized
+  splash `<svg>` + the WebGL canvas (`preserveDrawingBuffer` now on); recording
+  runs on a capped 960px/24fps compositing canvas so it can't jank the
+  time-based draw. Graceful fallbacks where `MediaRecorder`/Web Share are absent.
 
-- **Save/share the result** — export a PNG, and/or record the draw as a GIF/WebM
-  ("watch my portrait get drawn") for social sharing. Highest impact for reach.
+## Roadmap — remaining ideas (not yet done)
+
+- ✅ **Save/share the result — DONE (Feature #1).** PNG + video export + Web
+  Share on the done screen. Follow-ups if wanted: GIF output; a subtle
+  watermark; higher-fps capture on capable devices; include the hand in an
+  optional "making of" clip variant.
 - **Variable-width / pressure strokes** (Line2 or meshline) for a real ink feel
   instead of a uniform hairline.
 - **Face-priority sampling** — weight sampled points toward a detected face so
