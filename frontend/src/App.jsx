@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS = {
   seconds: 30,   // draw duration
   splash: 1.0,   // watercolor splash intensity
   detail: 'std', // 'fine' | 'std' | 'dense' → backend point density
+  mode: 'trace', // 'trace' (faithful strokes + pen lifts) | 'scribble' (one abstract line)
 };
 const SETTINGS_KEY = 'hh-settings-v1';
 
@@ -84,7 +85,9 @@ export default function App() {
     setStillBlob(null);
     setPhase('processing');
     try {
-      const data = await processImage(fileOrBlob, settingsRef.current.detail);
+      const data = await processImage(
+        fileOrBlob, settingsRef.current.detail, settingsRef.current.mode
+      );
       setPathData(data);
       setRunId((n) => n + 1);
       setPhase('drawing');

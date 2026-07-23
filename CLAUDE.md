@@ -7,10 +7,17 @@
 ## What it is
 
 Hypnotic Hand is a web app: upload a photo (or snap one with the camera) → a
-FastAPI backend turns it into **one continuous vector line** → a 3D, IK-driven
-hand (React Three Fiber) draws that line over ~30 seconds on top of randomized
-watercolor splashes. Every run of the same photo produces a different drawing
-(per-request entropy seeds the jitter).
+FastAPI backend turns it into a vector line drawing → a 3D, IK-driven hand
+(React Three Fiber) draws it over ~30 seconds on top of randomized watercolor
+splashes. Every run of the same photo produces a different drawing
+(per-request entropy seeds the jitter and stroke order).
+
+Two drawing **modes** (Style panel → Mode):
+- **`trace` (default, "Portrait")** — traces the actual detected edge chains
+  stroke-by-stroke; the hand LIFTS the pen between strokes. Faithful,
+  recognizable line portraits.
+- **`scribble` ("One-line")** — the original aesthetic: ONE continuous
+  unbroken line from a TSP tour over sampled edge points. Abstract.
 
 - **Live:** https://hand-painting-one.vercel.app
 - **Repo:** https://github.com/mbeenox/Hand-painting
@@ -20,16 +27,18 @@ watercolor splashes. Every run of the same photo produces a different drawing
 
 ```
 Browser (React + R3F)         multipart POST /api/process-image      FastAPI (api/index.py)
-  UploadPanel (file/camera) ───────────────────────────────────────▶  A. Canny edge detection
-  WatercolorSplash (SVG)                                               B. Poisson-disk sampling
-  Scene: usePathAnimation → penTip  ◀──── JSON {points, aspect} ─────  C. jitter → NN → 2-opt TSP
-         ├─ HandRig  (2-bone IK arm)                                   D. Chaikin smoothing
-         └─ InkTrail (growing polyline)                                → normalized [0,1] polyline
+  UploadPanel (file/camera) ────────────────────────────────────────▶  A. Canny edge detection
+  WatercolorSplash (SVG)                                                B. trace: contour chains →
+  Scene: usePathAnimation → penTip ◀── JSON {points,breaks,aspect} ──      order → smooth   (default)
+         ├─ HandRig  (2-bone IK arm)                                       scribble: sample → jitter →
+         └─ InkTrail (exact-append ribbon)                                 TSP → smooth
 ```
 
-The backend returns one ordered list of `[x,y]` points (a single continuous
-stroke). The frontend animates a pen along it; the arm is solved by analytic IK
-to keep the pen tip on the line; the ink trail grows behind the tip.
+The backend returns one ordered list of `[x,y]` points plus `breaks` (the
+index where each stroke starts; `[0]` = a single continuous line). The
+frontend animates a pen along the path — flying it, lifted, over the segment
+leading into each break — while the ink ribbon commits the exact path
+vertices behind it and bridges pen-up hops invisibly.
 
 ## Stack & key files
 
@@ -50,19 +59,35 @@ to keep the pen tip on the line; the ink trail grows behind the tip.
 
 ## Backend pipeline (`api/index.py`)
 
-1. **Edge detection** — bilateral filter + CLAHE, auto-thresholded Canny
-   (0.66/1.33 × median), speckle removal via connected components.
-2. **Sampling** — grid-hash Poisson-disk thinning; binary-search the radius to
-   land `MIN_POINTS..MAX_POINTS` points.
-3. **Jitter (before TSP)** — Gaussian σ, RNG from `os.urandom` → unique per run.
-4. **TSP** — Nearest-Neighbor seed + time-boxed vectorized 2-opt. Uncrossing is
-   the aesthetic workhorse (removing crossings always shortens the tour).
-5. **Smoothing** — Chaikin ×3 (≈ quadratic B-spline) + arc-length resample to
-   `OUTPUT_POINTS`. Output normalized to [0,1], y-up, longest side = 1.
+**Shared:** Edge detection — bilateral filter + CLAHE, auto-thresholded Canny
+(0.66/1.33 × median), speckle removal via connected components.
 
-Tunables live at the top of `api/index.py`. Current: `MAX_IMAGE_DIM=720`,
-`MIN_POINTS=500`, `MAX_POINTS=1300`, `TWO_OPT_TIME_BUDGET=2.0`, `OUTPUT_POINTS=2800`.
-Pipeline runs in ~2–3 s; the function `maxDuration` is 30 s.
+**`mode=trace` (default):**
+1. `trace_chains` — `cv2.findContours` on the edge map; out-and-back symmetry
+   test (c[k] ≈ c[-k]) keeps only the outbound half of thin-filament boundary
+   walks (closed rings kept whole); `approxPolyDP` simplification.
+2. `order_chains` — greedy nearest-endpoint stroke ordering from a RANDOM
+   start chain (per-run uniqueness), reversing chains when the tail is closer.
+3. `smooth_chains` — Gaussian jitter (`TRACE_JITTER_PX`) + Chaikin ×2 per
+   chain + arc-length resample, output budget ∝ chain length.
+4. Response includes **`breaks`** — the index where each stroke starts; the
+   frontend flies the pen (no ink) over the segment leading into each break.
+   Runs in ~0.1 s. `TRACE_LEVELS` maps detail → (epsilon, min_chain,
+   output_points, max_strokes).
+
+**`mode=scribble`:**
+1. **Sampling** — grid-hash Poisson-disk thinning; binary-search the radius,
+   **aiming for the top of the range** (the old acceptance band stopped at the
+   first count ≥ MIN_POINTS, which made the detail presets nearly identical).
+2. **Jitter (before TSP)** — Gaussian σ, RNG from `os.urandom` → unique per run.
+3. **TSP** — Nearest-Neighbor seed + time-boxed vectorized 2-opt.
+4. **Smoothing** — Chaikin ×3 + arc-length resample to `OUTPUT_POINTS`.
+   Runs in ~2–3 s.
+
+Output normalized to [0,1], y-up, longest side = 1. Tunables live at the top
+of `api/index.py`: `MAX_IMAGE_DIM=720`, `MIN_POINTS=500`, `MAX_POINTS=1300`,
+`TWO_OPT_TIME_BUDGET=2.0`, `OUTPUT_POINTS=2800`, `TRACE_LEVELS`,
+`TRACE_JITTER_PX=1.1`. Function `maxDuration` is 30 s.
 
 ## Local development
 
@@ -155,6 +180,35 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Feature #5 — faithful TRACE mode + pen lifts + exact-append ink
+  (2026-07-23)** — drawings finally *complete the image*. Diagnosis: the app
+  drew 100% of the backend path, but the TSP pipeline scattered ~800 points
+  (sampler bug: the binary search accepted the FIRST count in
+  [MIN, MAX] — i.e. near the minimum, so detail presets did ~nothing) and the
+  tour destroyed contour structure — faces dissolved into abstract loops at
+  any density. Drawing longer could never fix it. Changes:
+  (a) new default **`mode=trace`** backend path (`trace_chains` /
+  `order_chains` / `smooth_chains` in BOTH `api/index.py` and
+  `backend/main.py`) that traces real edge chains and returns **`breaks`**
+  (stroke start indices), ~0.1 s vs ~2.6 s;
+  (b) sampler binary search now targets the TOP of the point range
+  (scribble mode; dense preset actually dense now);
+  (c) `usePathAnimation` takes `breaks` → travel segments fly at
+  `TRAVEL_SPEED` with κ=0, `getPoint` returns penDown, exposes
+  `cumTime/isTravel/normals/warp`;
+  (d) `Scene` lifts the pen (z, smoothed) on hops — IK arm rises naturally —
+  and silences scratch audio while up;
+  (e) **`InkTrail` rewritten to EXACT-APPEND**: commits actual path vertices
+  as the clock passes them + one floating live-tip center, pen-up hops
+  bridged with zero-width degenerate quads. Fixes hop-inking (most hops are
+  shorter than one frame, so frame-sampling inked straight chords across
+  them — caught in headless E2E) and makes ink frame-rate independent;
+  width now derives from timetable speed. Ribbon/buffer discipline kept.
+  (f) Style panel gains a **Mode** toggle (Portrait/One-line); Sketch preset
+  → scribble+dense. Verified: unit checks (all levels, uniqueness,
+  invariants), HTTP checks both modes, `npm run build`, and headless E2E
+  screenshots showing a recognizable portrait.
+
 - **Feature #4 — style controls + presets (2026-07-22)** — a collapsible
   "⚙ Style" panel lets viewers set ink colour, stroke boldness, draw time,
   splash intensity, and a backend **detail** level (fine/std/dense → point
@@ -173,8 +227,10 @@ Hard-won deployment facts (do **not** regress):
   optional "making of" clip variant.
 - ✅ **Variable-width strokes — DONE (Feature #3).** Speed-driven ribbon with
   adaptive normalization + tapered nib. Follow-up: a soft-edge/ink-bleed shader.
-- **Face-priority sampling** — weight sampled points toward a detected face so
-  portraits keep eyes/nose/mouth, not just an outline.
+- **Face-priority sampling** — largely superseded by trace mode (Feature #5),
+  which keeps facial features by construction. Still relevant for scribble
+  mode, or as face-weighted `TRACE_LEVELS` (finer epsilon inside a detected
+  face box).
 - **Rigged hand `.glb`** in HandRig's marked GLTF slot, driven by the same IK solve.
 - ✅ **Polish — DONE (Feature #2):** processing spinner, splash fade-in reveal,
   synth pen-scratch audio + completion chime (off by default), reduced-motion.
@@ -192,3 +248,13 @@ Hard-won deployment facts (do **not** regress):
 - Bones are unit **cylinders** scaled to joint distance (capsules overshoot joints).
 - `PEN_AXIS` z must stay ~0.55 or the pen foreshortens into invisibility at the camera angle.
 - The frontend must keep downscaling uploads to ≤1280 px (Vercel's 4.5 MB request-body cap).
+- **Never frame-sample the pen to decide where ink goes.** Most pen-up hops
+  complete within ONE frame (travel time ≈ 5 ms < 16 ms), so any
+  sample-the-tip-per-frame ink renderer will ink straight chords across
+  hops and cut corners at low fps. `InkTrail` must stay exact-append
+  (committing `anim.worldPoints` by `cumTime`); the floating live-tip center
+  is the only frame-sampled vertex, and it collapses to zero width while
+  `isTravel` is active.
+- `smooth_chains` allocates ≥4 output points per stroke; keep `maxPoints`
+  in `Scene`'s `<InkTrail>` above max backend output + 2×max_strokes
+  (bridges) + 1 (floating tip) — currently 4600 + 640 + 1 ≪ 16000.

@@ -16,16 +16,21 @@ import InkTrail from './InkTrail.jsx';
 import { usePathAnimation } from '../hooks/usePathAnimation.js';
 
 const BOARD_SIZE = 8; // world units spanned by the drawing's longest side
+const PEN_LIFT = 0.42;   // how high (world z) the pen rises on pen-up hops
+const LIFT_RATE = 16;    // exp smoothing rate of the lift (higher = snappier)
 
 export default function Scene({
   pathData, duration, active, onComplete, speedRef, inkColor, weight,
 }) {
-  const anim = usePathAnimation(pathData.points, pathData.aspect, duration, BOARD_SIZE);
+  const anim = usePathAnimation(
+    pathData.points, pathData.aspect, duration, BOARD_SIZE, pathData.breaks
+  );
 
   // The single shared pen-tip position (world space, z=0 drawing plane).
   const penTip = useRef(new THREE.Vector3());
   const prevTip = useRef(new THREE.Vector3()); // last frame's tip → pen speed
   const clock = useRef({ elapsed: 0, done: false });
+  const liftRef = useRef(0); // smoothed pen-lift height (trace-mode hops)
 
   // Initialize the pen at the path start so the arm doesn't lurch on frame 1.
   useMemo(() => {
@@ -51,10 +56,20 @@ export default function Scene({
       return;
     }
     if (active) clock.current.elapsed += delta;
-    anim.getPoint(clock.current.elapsed, penTip.current);
+    const down = anim.getPoint(clock.current.elapsed, penTip.current);
+
+    // Lift the pen off the paper during pen-up hops (the IK arm follows the
+    // tip, so the whole hand rises and repositions like a real artist's).
+    // The ink itself is laid exactly along the path by InkTrail, so this is
+    // purely the hand's visual behavior.
+    const targetLift = down ? 0 : PEN_LIFT;
+    liftRef.current += (targetLift - liftRef.current) * (1 - Math.exp(-LIFT_RATE * delta));
+    penTip.current.z = liftRef.current;
+
     // Publish pen speed (world units/sec) for the optional pen-scratch audio.
+    // Zero while the pen is up so travel hops stay silent.
     if (speedRef) {
-      speedRef.current = active
+      speedRef.current = active && down
         ? penTip.current.distanceTo(prevTip.current) / Math.max(delta, 1e-4)
         : 0;
     }
@@ -72,10 +87,12 @@ export default function Scene({
       <directionalLight position={[4, 6, 8]} intensity={1.2} />
       <directionalLight position={[-6, -2, 4]} intensity={0.3} />
 
-      {/* maxPoints sized so even a 30s draw on a 240Hz display never
-          truncates the line (≈7.2k samples worst case). speedRef drives the
-          variable stroke width. */}
-      <InkTrail penTip={penTip} speedRef={speedRef} inkColor={inkColor} weight={weight}
+      {/* Exact-append renderer: commits the animation's actual path vertices
+          (plus a floating live-tip center), so the ink is complete and
+          frame-rate independent. maxPoints comfortably covers the largest
+          backend output (~4.6k vertices + 2 bridge centers per stroke). */}
+      <InkTrail anim={anim} penTip={penTip} clockRef={clock}
+                inkColor={inkColor} weight={weight}
                 maxPoints={16000} active={active} />
       <HandRig penTip={penTip} boardSize={BOARD_SIZE} />
     </>

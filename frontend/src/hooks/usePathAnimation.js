@@ -29,6 +29,9 @@ import { useMemo } from 'react';
 import * as THREE from 'three';
 
 const CURVE_SLOWDOWN = 3.0; // K: how hard curves brake the pen
+const TRAVEL_SPEED = 2.6;   // pen-up hops between strokes move this much faster
+                            // than the cruise speed (v=1) — a quick reposition,
+                            // not a drawn line
 
 // Global pacing envelope. A gentle ease-IN so the pen starts smoothly, a long
 // constant-speed cruise, then a SHORT ease-OUT so the line finishes with clear
@@ -47,7 +50,7 @@ function paceEnvelope(u) {
   return (area - (d * d) / (2 * EASE_OUT)) / area;
 }
 
-export function usePathAnimation(points, aspect, duration, boardSize = 8) {
+export function usePathAnimation(points, aspect, duration, boardSize = 8, breaks = null) {
   return useMemo(() => {
     if (!points || points.length < 2) return null;
 
@@ -65,6 +68,18 @@ export function usePathAnimation(points, aspect, duration, boardSize = 8) {
     const n = worldPoints.length;
 
     // ------------------------------------------------------------------
+    // 1b. Stroke breaks (trace mode). breaks[i] is the point index where
+    //     stroke i starts; the segment LEADING INTO each break (b-1 → b)
+    //     is a pen-up "travel" hop: it is flown quickly and never inked.
+    // ------------------------------------------------------------------
+    const isTravel = new Uint8Array(Math.max(0, n - 1));
+    if (breaks && breaks.length > 1) {
+      for (const bIdx of breaks) {
+        if (bIdx > 0 && bIdx < n) isTravel[bIdx - 1] = 1;
+      }
+    }
+
+    // ------------------------------------------------------------------
     // 2. Segment lengths + vertex curvature (turn angle per unit length).
     // ------------------------------------------------------------------
     const segLen = new Float32Array(n - 1);
@@ -76,6 +91,9 @@ export function usePathAnimation(points, aspect, duration, boardSize = 8) {
     const a = new THREE.Vector3();
     const b = new THREE.Vector3();
     for (let i = 1; i < n - 1; i++) {
+      // The turn angle across a pen-up hop is meaningless — leave κ = 0 at
+      // stroke boundaries so the pen doesn't fake-brake on landing/takeoff.
+      if (isTravel[i - 1] || isTravel[i]) continue;
       a.subVectors(worldPoints[i], worldPoints[i - 1]).normalize();
       b.subVectors(worldPoints[i + 1], worldPoints[i]).normalize();
       // angle between segment directions ∈ [0, π]; κ ≈ θ / mean chord
@@ -92,19 +110,49 @@ export function usePathAnimation(points, aspect, duration, boardSize = 8) {
     // ------------------------------------------------------------------
     const cumTime = new Float32Array(n);
     for (let i = 0; i < n - 1; i++) {
-      const kHat = Math.min(1, ((curvature[i] + curvature[i + 1]) * 0.5) / p90);
-      const speed = 1 / (1 + CURVE_SLOWDOWN * kHat); // v_i
+      let speed;
+      if (isTravel[i]) {
+        speed = TRAVEL_SPEED; // pen-up hop: quick reposition, no curve braking
+      } else {
+        const kHat = Math.min(1, ((curvature[i] + curvature[i + 1]) * 0.5) / p90);
+        speed = 1 / (1 + CURVE_SLOWDOWN * kHat); // v_i
+      }
       cumTime[i + 1] = cumTime[i] + segLen[i] / Math.max(speed, 1e-4);
     }
     const total = cumTime[n - 1];
     for (let i = 0; i < n; i++) cumTime[i] = (cumTime[i] / total) * duration;
 
     // ------------------------------------------------------------------
+    // 4b. Per-vertex unit normals (perpendicular to the local tangent),
+    //     one-sided at stroke boundaries so ribbons don't smear across
+    //     pen-up hops. Precomputing these lets the ink renderer commit
+    //     EXACT path vertices (frame-rate independent) with correct
+    //     ribbon orientation and zero per-frame allocation.
+    // ------------------------------------------------------------------
+    const normals = new Float32Array(2 * n);
+    for (let i = 0; i < n; i++) {
+      const ip = i > 0 && !isTravel[i - 1] ? i - 1 : i;
+      const inx = i < n - 1 && !isTravel[i] ? i + 1 : i;
+      let tx = worldPoints[inx].x - worldPoints[ip].x;
+      let ty = worldPoints[inx].y - worldPoints[ip].y;
+      const l = Math.hypot(tx, ty);
+      if (l > 1e-9) { tx /= l; ty /= l; } else { tx = 1; ty = 0; }
+      normals[2 * i] = -ty;
+      normals[2 * i + 1] = tx;
+    }
+
+    // Raw elapsed seconds → pace-warped time on the cumTime axis.
+    const warp = (elapsed) =>
+      paceEnvelope(THREE.MathUtils.clamp(elapsed / duration, 0, 1)) * duration;
+
+    // ------------------------------------------------------------------
     // 5. Runtime sampler: elapsed seconds → world position (binary search).
+    //    Writes into `out` and returns whether the pen is DOWN (inking) —
+    //    false while flying between strokes in trace mode.
     // ------------------------------------------------------------------
     function getPoint(elapsed, out) {
       // Global pacing envelope: warp raw time so the pen cruises and lands.
-      const t = paceEnvelope(THREE.MathUtils.clamp(elapsed / duration, 0, 1)) * duration;
+      const t = warp(elapsed);
 
       let lo = 0, hi = n - 1;
       while (hi - lo > 1) {
@@ -113,9 +161,14 @@ export function usePathAnimation(points, aspect, duration, boardSize = 8) {
       }
       const span = cumTime[hi] - cumTime[lo] || 1e-6;
       const f = (t - cumTime[lo]) / span;
-      return out.lerpVectors(worldPoints[lo], worldPoints[hi], f);
+      out.lerpVectors(worldPoints[lo], worldPoints[hi], f);
+      return !isTravel[Math.min(lo, n - 2)];
     }
 
-    return { getPoint, duration, worldPoints };
-  }, [points, aspect, duration, boardSize]);
+    return {
+      getPoint, duration, worldPoints,
+      // Exposed for the exact-append ink renderer (InkTrail):
+      cumTime, isTravel, normals, warp,
+    };
+  }, [points, aspect, duration, boardSize, breaks]);
 }

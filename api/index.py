@@ -67,6 +67,17 @@ DETAIL_LEVELS = {
     "dense": (1900, 3600),   # more coverage → fuller, more detailed
 }
 
+# Faithful "trace" mode presets, chosen via ?detail=… when mode=trace →
+# (approx_epsilon_px, min_chain_px, output_points, max_strokes).
+# Smaller epsilon / min_chain keeps more of the fine features.
+TRACE_LEVELS = {
+    "fine":  (1.6, 14, 2600, 140),
+    "std":   (1.1, 10, 3400, 220),
+    "dense": (0.8,  7, 4600, 320),
+}
+TRACE_JITTER_PX = 1.1      # per-run uniqueness for trace mode
+TRACE_CHAIKIN_ROUNDS = 2   # per-chain corner softening (lighter than TSP's 3)
+
 
 # ==========================================================================
 # Step A — Edge detection (identical to backend/main.py)
@@ -128,20 +139,27 @@ def sample_points(edges: np.ndarray, rng: np.random.Generator,
                     break
         return np.array(accepted)
 
+    # Binary-search the radius, aiming for the TOP of the range. (The old
+    # acceptance band was [MIN_POINTS, max_points], so the search stopped at
+    # the FIRST count anywhere in range — usually near the minimum, which
+    # made the detail presets nearly indistinguishable.)
     lo_r, hi_r = 1.0, float(max(edges.shape))
-    best = None
+    target_lo = max(MIN_POINTS, int(0.9 * max_points))
+    best, best_n = None, -1
     for _ in range(18):
         mid = 0.5 * (lo_r + hi_r)
         pts = thin(mid)
         n = len(pts)
-        if MIN_POINTS <= n <= max_points:
-            best = pts
-            break
         if n > max_points:
-            lo_r = mid
-            best = pts[:max_points] if best is None else best
+            lo_r = mid                     # too dense → grow radius
+            if best_n < max_points:
+                best, best_n = pts[:max_points], max_points
         else:
-            hi_r = mid
+            if n > best_n:                 # densest in-cap result so far
+                best, best_n = pts, n
+            if n >= target_lo:
+                break                      # within 90% of the cap → good
+            hi_r = mid                     # too sparse → shrink radius
     if best is None or len(best) < MIN_POINTS:
         best = pix[:min(max_points, len(pix))]
     return best[:max_points]
@@ -261,9 +279,140 @@ def normalize(path: np.ndarray, w: int, h: int):
 
 
 # ==========================================================================
+# TRACE mode — draw the actual edge chains (faithful line portrait)
+# ==========================================================================
+# The TSP pipeline above scatters points over the edge map and asks a tour
+# to connect them, which destroys which-edge-owns-which-point structure: at
+# any feasible density the face dissolves into abstract loops. Trace mode
+# instead follows each detected edge chain directly — eyes, mouth, and
+# outlines survive — and the frontend LIFTS the pen between chains (the
+# `breaks` array in the response marks where each new stroke starts).
+
+def _chaikin(path: np.ndarray, rounds: int) -> np.ndarray:
+    """Chaikin corner cutting (same math as smooth_path, endpoint-preserving)."""
+    for _ in range(rounds):
+        if len(path) < 3:
+            break
+        p0, p1 = path[:-1], path[1:]
+        q = 0.75 * p0 + 0.25 * p1
+        r = 0.25 * p0 + 0.75 * p1
+        mid = np.empty((2 * len(q), 2))
+        mid[0::2] = q
+        mid[1::2] = r
+        path = np.vstack([path[:1], mid, path[-1:]])
+    return path
+
+
+def _resample(path: np.ndarray, n: int) -> np.ndarray:
+    """Uniform arc-length resample to n vertices (np.interp over chord length)."""
+    keep = np.ones(len(path), dtype=bool)
+    keep[1:] = np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-9
+    path = path[keep]
+    if len(path) < 2:
+        return path
+    chords = np.linalg.norm(np.diff(path, axis=0), axis=1)
+    s = np.concatenate([[0.0], np.cumsum(chords)])
+    total = s[-1] if s[-1] > 0 else 1.0
+    target = np.linspace(0.0, total, max(2, n))
+    return np.column_stack([np.interp(target, s, path[:, 0]),
+                            np.interp(target, s, path[:, 1])])
+
+
+def trace_chains(edges: np.ndarray, epsilon: float, min_chain: int) -> List[np.ndarray]:
+    """
+    Extract ordered polyline chains from the (thin) Canny edge map.
+
+    cv2.findContours walks the BOUNDARY of each 1-px edge filament — i.e. out
+    along one side and back along the other, so the walk is ~2× the filament
+    and retraces itself. We detect that out-and-back symmetry (c[k] ≈ c[-k])
+    and keep only the outbound half; genuinely closed rings (no symmetry)
+    are kept whole. Each chain is then simplified with approxPolyDP so the
+    pen draws intentional strokes instead of pixel staircases.
+    """
+    cnts, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    chains: List[np.ndarray] = []
+    for c in cnts:
+        c = c[:, 0, :].astype(np.float64)
+        if len(c) < min_chain:
+            continue
+        m = len(c) // 2
+        if m >= 4:
+            k = np.linspace(1, m - 1, num=min(8, m - 1)).astype(int)
+            sym = float(np.mean(np.linalg.norm(c[k] - c[len(c) - k], axis=1)))
+            if sym < 3.0:               # out-and-back filament → one-way trace
+                c = c[: m + 1]
+        approx = cv2.approxPolyDP(c.astype(np.float32).reshape(-1, 1, 2),
+                                  epsilon, False)
+        c = approx[:, 0, :].astype(np.float64)
+        if len(c) >= 2:
+            chains.append(c)
+    return chains
+
+
+def _chain_len(ch: np.ndarray) -> float:
+    return float(np.sum(np.linalg.norm(np.diff(ch, axis=0), axis=1)))
+
+
+def order_chains(chains: List[np.ndarray],
+                 rng: np.random.Generator) -> List[np.ndarray]:
+    """
+    Order chains for drawing: greedy nearest-endpoint chaining (a tiny "TSP
+    over strokes") so pen travel between strokes stays short. The starting
+    chain is random → each run draws the same portrait in a different order,
+    preserving the every-run-is-unique character of the app.
+    """
+    if not chains:
+        return []
+    remaining = list(chains)
+    first = remaining.pop(int(rng.integers(len(remaining))))
+    if bool(rng.integers(2)):
+        first = first[::-1]
+    ordered = [first]
+    cur = first[-1]
+    while remaining:
+        heads = np.array([ch[0] for ch in remaining])
+        tails = np.array([ch[-1] for ch in remaining])
+        dh = np.einsum("ij,ij->i", heads - cur, heads - cur)
+        dt = np.einsum("ij,ij->i", tails - cur, tails - cur)
+        ih, it = int(np.argmin(dh)), int(np.argmin(dt))
+        if dh[ih] <= dt[it]:
+            ch = remaining.pop(ih)
+        else:
+            ch = remaining.pop(it)[::-1]
+        ordered.append(ch)
+        cur = ch[-1]
+    return ordered
+
+
+def smooth_chains(chains: List[np.ndarray], total_points: int,
+                  rng: np.random.Generator):
+    """
+    Jitter (per-run uniqueness) + Chaikin-soften + arc-length-resample every
+    chain, allocating the output budget proportionally to chain length.
+    Returns (flat_path, breaks) where breaks[i] is the index into flat_path
+    at which stroke i starts (breaks[0] == 0).
+    """
+    chains = [ch + rng.normal(0.0, TRACE_JITTER_PX, size=ch.shape)
+              for ch in chains]
+    chains = [_chaikin(ch, TRACE_CHAIKIN_ROUNDS) for ch in chains]
+    lengths = np.array([max(_chain_len(ch), 1e-6) for ch in chains])
+    total_len = float(np.sum(lengths))
+    parts: List[np.ndarray] = []
+    breaks: List[int] = []
+    acc = 0
+    for ch, ln in zip(chains, lengths):
+        n = max(4, int(round(total_points * ln / total_len)))
+        res = _resample(ch, n)
+        breaks.append(acc)
+        parts.append(res)
+        acc += len(res)
+    return np.vstack(parts), breaks
+
+
+# ==========================================================================
 # Endpoint — registered at both the Vercel path and the bare path
 # ==========================================================================
-async def _process(file: UploadFile, detail: str = "std"):
+async def _process(file: UploadFile, detail: str = "std", mode: str = "trace"):
     t_start = time.perf_counter()
     raw = await file.read()
     if not raw:
@@ -271,8 +420,8 @@ async def _process(file: UploadFile, detail: str = "std"):
     img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(status_code=415, detail="Could not decode image.")
-
-    max_points, output_points = DETAIL_LEVELS.get(detail, DETAIL_LEVELS["std"])
+    if mode not in ("trace", "scribble"):
+        mode = "trace"
 
     h, w = img.shape[:2]
     if max(h, w) > MAX_IMAGE_DIM:
@@ -282,39 +431,71 @@ async def _process(file: UploadFile, detail: str = "std"):
 
     rng = np.random.default_rng(int.from_bytes(os.urandom(8), "little"))
 
-    edges = detect_edges(img)                          # A
-    pts = sample_points(edges, rng, max_points)        # B
-    pts = jitter_points(pts, rng)                      # D
-    order = nearest_neighbor_path(pts, rng)            # C
-    path = two_opt(pts, order, TWO_OPT_TIME_BUDGET)    # C
-    path = smooth_path(path, output_points)            # E
+    edges = detect_edges(img)                                  # A
+    breaks = [0]
+
+    if mode == "trace":
+        eps, min_chain, output_points, max_strokes = \
+            TRACE_LEVELS.get(detail, TRACE_LEVELS["std"])
+        chains = trace_chains(edges, eps, min_chain)           # B′ follow edges
+        if not chains:
+            raise HTTPException(
+                status_code=422,
+                detail="Not enough edge detail found in the image — try a "
+                       "higher-contrast photo (a clear portrait works best).",
+            )
+        if len(chains) > max_strokes:                          # keep the longest
+            chains.sort(key=_chain_len, reverse=True)
+            chains = chains[:max_strokes]
+        chains = order_chains(chains, rng)                     # C′ stroke order
+        path, breaks = smooth_chains(chains, output_points, rng)  # D′+E′
+        num_sampled = int(sum(len(c) for c in chains))
+    else:  # "scribble" — the original abstract one-line TSP look
+        max_points, output_points = DETAIL_LEVELS.get(detail, DETAIL_LEVELS["std"])
+        pts = sample_points(edges, rng, max_points)            # B
+        pts = jitter_points(pts, rng)                          # D
+        order = nearest_neighbor_path(pts, rng)                # C
+        path = two_opt(pts, order, TWO_OPT_TIME_BUDGET)        # C
+        path = smooth_path(path, output_points)                # E
+        num_sampled = int(len(pts))
+
     norm, aspect = normalize(path, w, h)
 
     elapsed = time.perf_counter() - t_start
     length = float(np.sum(np.linalg.norm(np.diff(norm, axis=0), axis=1)))
-    log.info("processed %s: %d pts → %d, len=%.2f, %.2fs",
-             file.filename, len(pts), len(norm), length, elapsed)
+    log.info("processed %s [%s/%s]: %d pts → %d in %d strokes, len=%.2f, %.2fs",
+             file.filename, mode, detail, num_sampled, len(norm), len(breaks),
+             length, elapsed)
 
     return {
         "points": np.round(norm, 5).tolist(),
+        # Index into `points` where each stroke starts; the frontend lifts
+        # the pen on the segment leading INTO each break. [0] ⇒ one stroke
+        # (scribble mode) — older clients that ignore this field simply draw
+        # the strokes connected, which still renders sensibly.
+        "breaks": breaks,
+        "mode": mode,
+        "numStrokes": len(breaks),
         "aspect": aspect,
-        "numSampled": int(len(pts)),
+        "numSampled": num_sampled,
         "pathLength": round(length, 4),
         "processingSeconds": round(elapsed, 3),
     }
 
 
 @app.post("/api/process-image")   # path seen when deployed on Vercel
-async def process_image_vercel(file: UploadFile = File(...), detail: str = "std"):
-    return await _process(file, detail)
+async def process_image_vercel(file: UploadFile = File(...),
+                               detail: str = "std", mode: str = "trace"):
+    return await _process(file, detail, mode)
 
 
 @app.post("/process-image")       # path seen under bare local uvicorn
-async def process_image_local(file: UploadFile = File(...), detail: str = "std"):
-    return await _process(file, detail)
+async def process_image_local(file: UploadFile = File(...),
+                              detail: str = "std", mode: str = "trace"):
+    return await _process(file, detail, mode)
 
 
-BUILD_MARKER = "2026-07-21-r2"  # bumped per deploy to verify rollouts
+BUILD_MARKER = "2026-07-23-r3-trace"  # bumped per deploy to verify rollouts
 
 
 @app.get("/api/health")

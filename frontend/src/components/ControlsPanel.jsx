@@ -8,12 +8,13 @@
 import React, { useState } from 'react';
 
 const PRESETS = {
-  'Fine liner': { inkColor: '#141428', weight: 0.7, seconds: 26, splash: 0.55, detail: 'std' },
-  'Bold ink':   { inkColor: '#0d0d14', weight: 1.5, seconds: 30, splash: 1.0,  detail: 'std' },
-  'Sketch':     { inkColor: '#3a2f2a', weight: 1.0, seconds: 34, splash: 1.3,  detail: 'dense' },
+  'Fine liner': { inkColor: '#141428', weight: 0.7, seconds: 26, splash: 0.55, detail: 'std',   mode: 'trace' },
+  'Bold ink':   { inkColor: '#0d0d14', weight: 1.5, seconds: 30, splash: 1.0,  detail: 'std',   mode: 'trace' },
+  'Sketch':     { inkColor: '#3a2f2a', weight: 1.0, seconds: 34, splash: 1.3,  detail: 'dense', mode: 'scribble' },
 };
 const SWATCHES = ['#141428', '#0d0d14', '#3a2f2a', '#1e3a5f', '#5a1f2e'];
 const DETAILS = [['fine', 'Fine'], ['std', 'Standard'], ['dense', 'Dense']];
+const MODES = [['trace', 'Portrait'], ['scribble', 'One-line']];
 
 const ui = {
   wrap: { position: 'absolute', left: 16, bottom: 16, zIndex: 11, fontFamily: 'Georgia, serif' },
@@ -89,6 +90,21 @@ export default function ControlsPanel({ settings, onChange }) {
             <input style={ui.range} type="range" min="0" max="1.5" step="0.05"
               value={settings.splash}
               onChange={(e) => onChange({ splash: parseFloat(e.target.value) })} />
+          </div>
+
+          <div style={ui.row}>
+            <span style={ui.label}>Mode</span>
+            <div style={ui.seg}>
+              {MODES.map(([v, lbl]) => (
+                <button key={v} style={ui.segBtn((settings.mode ?? 'trace') === v)}
+                  title={v === 'trace'
+                    ? 'Faithful strokes — the hand lifts the pen between lines'
+                    : 'Abstract single unbroken line (the original look)'}
+                  onClick={() => onChange({ mode: v })}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div style={ui.row}>

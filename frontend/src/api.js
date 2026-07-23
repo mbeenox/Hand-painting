@@ -37,14 +37,18 @@ async function downscaleImage(fileOrBlob) {
   }
 }
 
-export async function processImage(fileOrBlob, detail = 'std') {
+export async function processImage(fileOrBlob, detail = 'std', mode = 'trace') {
   const upload = await downscaleImage(fileOrBlob);
   const form = new FormData();
   // Field name MUST be "file" to match the FastAPI parameter.
   form.append('file', upload, fileOrBlob.name ?? 'snapshot.jpg');
 
-  // 'std' is the backend default; only send the query when it differs.
-  const qs = detail && detail !== 'std' ? `?detail=${encodeURIComponent(detail)}` : '';
+  // Only send queries that differ from the backend defaults (std / trace).
+  const params = new URLSearchParams();
+  if (detail && detail !== 'std') params.set('detail', detail);
+  if (mode && mode !== 'trace') params.set('mode', mode);
+  const q = params.toString();
+  const qs = q ? `?${q}` : '';
   const res = await fetch(`${API_BASE}/process-image${qs}`, {
     method: 'POST',
     body: form, // browser sets the multipart boundary header itself

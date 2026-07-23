@@ -73,6 +73,16 @@ TWO_OPT_TIME_BUDGET = 2.0  # seconds spent untangling the (denser) tour
 SPLINE_OUTPUT_POINTS = 2800  # resolution of the final smoothed polyline
 SPLINE_SMOOTHING = 2.0     # scipy splprep smoothing factor multiplier
 
+# Faithful "trace" mode presets (in lockstep with api/index.py) →
+# (approx_epsilon_px, min_chain_px, output_points, max_strokes).
+TRACE_LEVELS = {
+    "fine":  (1.6, 14, 2600, 140),
+    "std":   (1.1, 10, 3400, 220),
+    "dense": (0.8,  7, 4600, 320),
+}
+TRACE_JITTER_PX = 1.1
+TRACE_CHAIKIN_ROUNDS = 2
+
 
 # ==========================================================================
 # Step A — Edge detection
@@ -158,20 +168,26 @@ def sample_points(edges: np.ndarray, rng: np.random.Generator) -> np.ndarray:
                     break  # radius clearly too small; bail early
         return np.array(accepted)
 
-    # Binary search the thinning radius to hit the target point count.
+    # Binary-search the radius, aiming for the TOP of the range. (The old
+    # acceptance band was [MIN_POINTS, MAX_POINTS], so the search stopped at
+    # the FIRST count anywhere in range — usually near the minimum, which
+    # made higher point caps nearly indistinguishable.)
     lo_r, hi_r = 1.0, float(max(edges.shape))
-    best = None
+    target_lo = max(MIN_POINTS, int(0.9 * MAX_POINTS))
+    best, best_n = None, -1
     for _ in range(18):
         mid = 0.5 * (lo_r + hi_r)
         pts = thin(mid)
         n = len(pts)
-        if MIN_POINTS <= n <= MAX_POINTS:
-            best = pts
-            break
         if n > MAX_POINTS:
             lo_r = mid          # too dense → grow radius
-            best = pts[:MAX_POINTS] if best is None else best
+            if best_n < MAX_POINTS:
+                best, best_n = pts[:MAX_POINTS], MAX_POINTS
         else:
+            if n > best_n:      # densest in-cap result so far
+                best, best_n = pts, n
+            if n >= target_lo:
+                break           # within 90% of the cap → good
             hi_r = mid          # too sparse → shrink radius
     if best is None or len(best) < MIN_POINTS:
         # Fallback: plain random subsample (still respects count bounds).
@@ -331,6 +347,108 @@ def smooth_path(path: np.ndarray) -> np.ndarray:
 
 
 # ==========================================================================
+# TRACE mode — draw the actual edge chains (faithful line portrait).
+# Identical implementation to api/index.py (cv2 + numpy only); see the
+# rationale there. The frontend lifts the pen between chains via `breaks`.
+# ==========================================================================
+def _chaikin(path: np.ndarray, rounds: int) -> np.ndarray:
+    for _ in range(rounds):
+        if len(path) < 3:
+            break
+        p0, p1 = path[:-1], path[1:]
+        q = 0.75 * p0 + 0.25 * p1
+        r = 0.25 * p0 + 0.75 * p1
+        mid = np.empty((2 * len(q), 2))
+        mid[0::2] = q
+        mid[1::2] = r
+        path = np.vstack([path[:1], mid, path[-1:]])
+    return path
+
+
+def _resample(path: np.ndarray, n: int) -> np.ndarray:
+    keep = np.ones(len(path), dtype=bool)
+    keep[1:] = np.linalg.norm(np.diff(path, axis=0), axis=1) > 1e-9
+    path = path[keep]
+    if len(path) < 2:
+        return path
+    chords = np.linalg.norm(np.diff(path, axis=0), axis=1)
+    s = np.concatenate([[0.0], np.cumsum(chords)])
+    total = s[-1] if s[-1] > 0 else 1.0
+    target = np.linspace(0.0, total, max(2, n))
+    return np.column_stack([np.interp(target, s, path[:, 0]),
+                            np.interp(target, s, path[:, 1])])
+
+
+def trace_chains(edges: np.ndarray, epsilon: float, min_chain: int) -> List[np.ndarray]:
+    cnts, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    chains: List[np.ndarray] = []
+    for c in cnts:
+        c = c[:, 0, :].astype(np.float64)
+        if len(c) < min_chain:
+            continue
+        m = len(c) // 2
+        if m >= 4:
+            k = np.linspace(1, m - 1, num=min(8, m - 1)).astype(int)
+            sym = float(np.mean(np.linalg.norm(c[k] - c[len(c) - k], axis=1)))
+            if sym < 3.0:               # out-and-back filament → one-way trace
+                c = c[: m + 1]
+        approx = cv2.approxPolyDP(c.astype(np.float32).reshape(-1, 1, 2),
+                                  epsilon, False)
+        c = approx[:, 0, :].astype(np.float64)
+        if len(c) >= 2:
+            chains.append(c)
+    return chains
+
+
+def _chain_len(ch: np.ndarray) -> float:
+    return float(np.sum(np.linalg.norm(np.diff(ch, axis=0), axis=1)))
+
+
+def order_chains(chains: List[np.ndarray],
+                 rng: np.random.Generator) -> List[np.ndarray]:
+    if not chains:
+        return []
+    remaining = list(chains)
+    first = remaining.pop(int(rng.integers(len(remaining))))
+    if bool(rng.integers(2)):
+        first = first[::-1]
+    ordered = [first]
+    cur = first[-1]
+    while remaining:
+        heads = np.array([ch[0] for ch in remaining])
+        tails = np.array([ch[-1] for ch in remaining])
+        dh = np.einsum("ij,ij->i", heads - cur, heads - cur)
+        dt = np.einsum("ij,ij->i", tails - cur, tails - cur)
+        ih, it = int(np.argmin(dh)), int(np.argmin(dt))
+        if dh[ih] <= dt[it]:
+            ch = remaining.pop(ih)
+        else:
+            ch = remaining.pop(it)[::-1]
+        ordered.append(ch)
+        cur = ch[-1]
+    return ordered
+
+
+def smooth_chains(chains: List[np.ndarray], total_points: int,
+                  rng: np.random.Generator):
+    chains = [ch + rng.normal(0.0, TRACE_JITTER_PX, size=ch.shape)
+              for ch in chains]
+    chains = [_chaikin(ch, TRACE_CHAIKIN_ROUNDS) for ch in chains]
+    lengths = np.array([max(_chain_len(ch), 1e-6) for ch in chains])
+    total_len = float(np.sum(lengths))
+    parts: List[np.ndarray] = []
+    breaks: List[int] = []
+    acc = 0
+    for ch, ln in zip(chains, lengths):
+        n = max(4, int(round(total_points * ln / total_len)))
+        res = _resample(ch, n)
+        breaks.append(acc)
+        parts.append(res)
+        acc += len(res)
+    return np.vstack(parts), breaks
+
+
+# ==========================================================================
 # Normalization for the frontend
 # ==========================================================================
 def normalize(path: np.ndarray, w: int, h: int) -> Tuple[np.ndarray, float]:
@@ -354,6 +472,8 @@ def normalize(path: np.ndarray, w: int, h: int) -> Tuple[np.ndarray, float]:
 async def process_image(
     file: UploadFile = File(...),
     solver: str = Query("2opt", pattern="^(2opt|christofides)$"),
+    detail: str = Query("std", pattern="^(fine|std|dense)$"),
+    mode: str = Query("trace", pattern="^(trace|scribble)$"),
 ):
     t_start = time.perf_counter()
 
@@ -377,27 +497,52 @@ async def process_image(
     rng = np.random.default_rng(int.from_bytes(os.urandom(8), "little"))
 
     edges = detect_edges(img)                       # Step A
-    pts = sample_points(edges, rng)                 # Step B
-    pts = jitter_points(pts, rng)                   # Step D (pre-TSP!)
+    breaks = [0]
 
-    if solver == "christofides":                    # Step C
-        path = christofides_path(pts)
+    if mode == "trace":
+        eps, min_chain, output_points, max_strokes = \
+            TRACE_LEVELS.get(detail, TRACE_LEVELS["std"])
+        chains = trace_chains(edges, eps, min_chain)
+        if not chains:
+            raise HTTPException(
+                status_code=422,
+                detail="Not enough edge detail found in the image — try a "
+                       "higher-contrast photo (a clear portrait works best).",
+            )
+        if len(chains) > max_strokes:
+            chains.sort(key=_chain_len, reverse=True)
+            chains = chains[:max_strokes]
+        chains = order_chains(chains, rng)
+        path, breaks = smooth_chains(chains, output_points, rng)
+        num_sampled = int(sum(len(c) for c in chains))
     else:
-        order = nearest_neighbor_path(pts, rng)
-        path = two_opt(pts, order, TWO_OPT_TIME_BUDGET)
+        pts = sample_points(edges, rng)             # Step B
+        pts = jitter_points(pts, rng)               # Step D (pre-TSP!)
 
-    path = smooth_path(path)                        # Step E
+        if solver == "christofides":                # Step C
+            path = christofides_path(pts)
+        else:
+            order = nearest_neighbor_path(pts, rng)
+            path = two_opt(pts, order, TWO_OPT_TIME_BUDGET)
+
+        path = smooth_path(path)                    # Step E
+        num_sampled = int(len(pts))
+
     norm, aspect = normalize(path, w, h)
 
     elapsed = time.perf_counter() - t_start
     length = float(np.sum(np.linalg.norm(np.diff(norm, axis=0), axis=1)))
-    log.info("processed %s: %d sampled pts → %d spline pts, len=%.2f, %.2fs",
-             file.filename, len(pts), len(norm), length, elapsed)
+    log.info("processed %s [%s/%s]: %d pts → %d in %d strokes, len=%.2f, %.2fs",
+             file.filename, mode, detail, num_sampled, len(norm), len(breaks),
+             length, elapsed)
 
     return {
         "points": np.round(norm, 5).tolist(),  # [[x, y], ...] normalized, y-up
+        "breaks": breaks,                      # stroke start indices (see api/)
+        "mode": mode,
+        "numStrokes": len(breaks),
         "aspect": aspect,                      # width / height of the source
-        "numSampled": int(len(pts)),
+        "numSampled": num_sampled,
         "pathLength": round(length, 4),        # in normalized units
         "processingSeconds": round(elapsed, 3),
     }
