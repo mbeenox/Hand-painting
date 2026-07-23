@@ -59,8 +59,14 @@ vertices behind it and bridges pen-up hops invisibly.
 
 ## Backend pipeline (`api/index.py`)
 
-**Shared:** Edge detection — bilateral filter + CLAHE, auto-thresholded Canny
-(0.66/1.33 × median), speckle removal via connected components.
+**Shared:** Input scale normalized in BOTH directions to `MAX_IMAGE_DIM`
+(downscale large, upscale small — pixel-unit tunables mean the same thing for
+every input). Edge detection — CLAHE **then** gentle bilateral
+(sigmaColor 35), Canny auto-thresholded from the **gradient-magnitude
+distribution** (hi = 92nd percentile of nonzero Sobel magnitudes,
+lo = 0.45·hi), speckle removal via connected components. Do NOT go back to
+intensity-median thresholds: they go blind on bright, washed-out photos
+(white-on-white subjects) and whole regions vanish from the drawing.
 
 **`mode=trace` (default):**
 1. `trace_chains` — `cv2.findContours` on the edge map; out-and-back symmetry
@@ -179,6 +185,18 @@ Hard-won deployment facts (do **not** regress):
   incremental `drawRange` growth, no per-frame rebuilds. `InkTrail.jsx` rewritten;
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
+
+- **Edge-detection fix (2026-07-23)** — trace mode drew a great face but
+  missed bright/low-contrast regions (user's white-robe-on-white-background
+  photo: robe and hood absent). Cause: Canny thresholds from the intensity
+  MEDIAN — high on bright images → faint edges culled (reproduced: washed-out
+  test image dropped from ~15k to ~2.9k edge px). Fix (both backends, in
+  lockstep): CLAHE before a gentler bilateral (sigmaColor 50→35), Canny
+  thresholds from gradient-magnitude percentiles (hi=P92 of nonzero Sobel
+  mags, lo=0.45·hi) → washed test recovers to ~10.5k px, normal images
+  unchanged (~16k). Also: input scale normalized in both directions
+  (small uploads upscaled to 720, INTER_CUBIC) so low-res photos draw just
+  as complete. BUILD_MARKER 2026-07-23-r4-edges.
 
 - **Feature #5 — faithful TRACE mode + pen lifts + exact-append ink
   (2026-07-23)** — drawings finally *complete the image*. Diagnosis: the app

@@ -84,11 +84,21 @@ TRACE_CHAIKIN_ROUNDS = 2   # per-chain corner softening (lighter than TSP's 3)
 # ==========================================================================
 def detect_edges(img_bgr: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=50, sigmaSpace=50)
+    # CLAHE FIRST so faint structure is amplified before smoothing can kill
+    # it; gentler bilateral (sigmaColor 50→35) keeps soft edges alive.
     gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
-    v = float(np.median(gray))
-    edges = cv2.Canny(gray, int(max(0, 0.66 * v)), int(min(255, 1.33 * v)),
-                      L2gradient=True)
+    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=35, sigmaSpace=50)
+    # Auto-Canny from the GRADIENT-MAGNITUDE distribution, not the intensity
+    # median. The old 0.66/1.33×median thresholds went blind on bright,
+    # washed-out photos (white-on-white subjects): a high median pushed the
+    # thresholds above every faint edge and whole regions vanished from the
+    # drawing. Percentiles of the actual gradients adapt to any contrast.
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    mag = np.hypot(gx, gy)
+    nz = mag[mag > 1.0]
+    hi = float(np.percentile(nz, 92.0)) if len(nz) else 100.0
+    edges = cv2.Canny(gray, 0.45 * hi, hi, L2gradient=True)
     n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(edges, connectivity=8)
     min_blob = max(10, int(0.00005 * edges.size))
     keep = np.zeros_like(edges)
@@ -423,10 +433,15 @@ async def _process(file: UploadFile, detail: str = "std", mode: str = "trace"):
     if mode not in ("trace", "scribble"):
         mode = "trace"
 
+    # Normalize scale in BOTH directions: downscale large uploads AND upscale
+    # small ones (e.g. low-res memes) to MAX_IMAGE_DIM, so edge/chain tunables
+    # in pixel units mean the same thing for every input and small photos
+    # yield just as complete a drawing.
     h, w = img.shape[:2]
-    if max(h, w) > MAX_IMAGE_DIM:
+    if max(h, w) != MAX_IMAGE_DIM:
         f = MAX_IMAGE_DIM / max(h, w)
-        img = cv2.resize(img, (int(w * f), int(h * f)), interpolation=cv2.INTER_AREA)
+        interp = cv2.INTER_AREA if f < 1 else cv2.INTER_CUBIC
+        img = cv2.resize(img, (int(w * f), int(h * f)), interpolation=interp)
         h, w = img.shape[:2]
 
     rng = np.random.default_rng(int.from_bytes(os.urandom(8), "little"))
@@ -495,7 +510,7 @@ async def process_image_local(file: UploadFile = File(...),
     return await _process(file, detail, mode)
 
 
-BUILD_MARKER = "2026-07-23-r3-trace"  # bumped per deploy to verify rollouts
+BUILD_MARKER = "2026-07-23-r4-edges"  # bumped per deploy to verify rollouts
 
 
 @app.get("/api/health")

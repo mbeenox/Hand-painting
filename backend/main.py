@@ -91,21 +91,21 @@ def detect_edges(img_bgr: np.ndarray) -> np.ndarray:
     """Grayscale → denoise → auto-thresholded Canny edge map (uint8 0/255)."""
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    # Bilateral filter smooths skin/background texture while KEEPING edges
-    # sharp — much better than Gaussian blur for portrait line art.
-    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=50, sigmaSpace=50)
-
-    # Histogram equalization lifts contrast on dim photos so Canny has
-    # something to bite into.
+    # CLAHE FIRST so faint structure is amplified before smoothing can kill
+    # it; then a gentler bilateral filter (sigmaColor 35) that smooths
+    # skin/background texture while KEEPING soft edges alive.
     gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    gray = cv2.bilateralFilter(gray, d=7, sigmaColor=35, sigmaSpace=50)
 
-    # Auto Canny: derive thresholds from the median intensity (classic
-    # trick — ~0.66*median and ~1.33*median bracket the "interesting"
-    # gradient magnitudes for most photographs).
-    v = float(np.median(gray))
-    lo = int(max(0, 0.66 * v))
-    hi = int(min(255, 1.33 * v))
-    edges = cv2.Canny(gray, lo, hi, L2gradient=True)
+    # Auto-Canny from the GRADIENT-MAGNITUDE distribution, not the intensity
+    # median (in lockstep with api/index.py — the median trick went blind on
+    # bright, washed-out photos and whole regions vanished from the drawing).
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    mag = np.hypot(gx, gy)
+    nz = mag[mag > 1.0]
+    hi = float(np.percentile(nz, 92.0)) if len(nz) else 100.0
+    edges = cv2.Canny(gray, 0.45 * hi, hi, L2gradient=True)
 
     # Drop tiny speckle components (noise) — keep only edge blobs with a
     # meaningful number of pixels so the line doesn't chase dust.
@@ -485,11 +485,13 @@ async def process_image(
     if img is None:
         raise HTTPException(status_code=415, detail="Could not decode image.")
 
-    # Downscale for speed / consistent point density.
+    # Normalize scale in BOTH directions (downscale large, upscale small) so
+    # pixel-unit tunables mean the same thing for every input.
     h, w = img.shape[:2]
-    if max(h, w) > MAX_IMAGE_DIM:
+    if max(h, w) != MAX_IMAGE_DIM:
         f = MAX_IMAGE_DIM / max(h, w)
-        img = cv2.resize(img, (int(w * f), int(h * f)), interpolation=cv2.INTER_AREA)
+        interp = cv2.INTER_AREA if f < 1 else cv2.INTER_CUBIC
+        img = cv2.resize(img, (int(w * f), int(h * f)), interpolation=interp)
         h, w = img.shape[:2]
 
     # Fresh entropy every request → Step D non-determinism is real, not
