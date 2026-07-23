@@ -44,7 +44,7 @@ function makeBlobPath(cx, cy, baseR, rng) {
   return d + ' Z';
 }
 
-export default function WatercolorSplash({ count = 3 }) {
+export default function WatercolorSplash({ count = 3, intensity = 1 }) {
   const blobs = useMemo(() => {
     const rng = Math.random; // fresh randomness on every mount (per run)
     const chosen = [...PALETTES].sort(() => rng() - 0.5).slice(0, count);
@@ -82,7 +82,7 @@ export default function WatercolorSplash({ count = 3 }) {
           key={b.id}
           d={b.d}
           fill={`url(#wc-${b.id})`}
-          opacity={b.opacity}
+          opacity={Math.min(0.95, b.opacity * intensity)}
           filter="url(#wc-bleed)"
         />
       ))}

@@ -17,7 +17,9 @@ import { usePathAnimation } from '../hooks/usePathAnimation.js';
 
 const BOARD_SIZE = 8; // world units spanned by the drawing's longest side
 
-export default function Scene({ pathData, duration, active, onComplete, speedRef }) {
+export default function Scene({
+  pathData, duration, active, onComplete, speedRef, inkColor, weight,
+}) {
   const anim = usePathAnimation(pathData.points, pathData.aspect, duration, BOARD_SIZE);
 
   // The single shared pen-tip position (world space, z=0 drawing plane).
@@ -73,7 +75,8 @@ export default function Scene({ pathData, duration, active, onComplete, speedRef
       {/* maxPoints sized so even a 30s draw on a 240Hz display never
           truncates the line (≈7.2k samples worst case). speedRef drives the
           variable stroke width. */}
-      <InkTrail penTip={penTip} speedRef={speedRef} maxPoints={16000} active={active} />
+      <InkTrail penTip={penTip} speedRef={speedRef} inkColor={inkColor} weight={weight}
+                maxPoints={16000} active={active} />
       <HandRig penTip={penTip} boardSize={BOARD_SIZE} />
     </>
   );

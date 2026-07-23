@@ -155,6 +155,16 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Feature #4 — style controls + presets (2026-07-22)** — a collapsible
+  "⚙ Style" panel lets viewers set ink colour, stroke boldness, draw time,
+  splash intensity, and a backend **detail** level (fine/std/dense → point
+  density), plus 3 presets (Fine liner / Bold ink / Sketch). Settings persist to
+  localStorage and apply on the next draw (ink colour also recolours a finished
+  piece live). New `components/ControlsPanel.jsx`; `InkTrail` takes
+  inkColor/weight, `WatercolorSplash` takes intensity, `Scene` threads them;
+  `api.js` sends `?detail=…`; `api/index.py` maps it via `DETAIL_LEVELS` (all
+  levels re-verified ≤2.2s). Settings state + localStorage live in `App.jsx`.
+
 ## Roadmap — remaining ideas (not yet done)
 
 - ✅ **Save/share the result — DONE (Feature #1).** PNG + video export + Web
@@ -169,7 +179,9 @@ Hard-won deployment facts (do **not** regress):
 - ✅ **Polish — DONE (Feature #2):** processing spinner, splash fade-in reveal,
   synth pen-scratch audio + completion chime (off by default), reduced-motion.
   Remaining here: **adaptive duration** scaled to path length; a camera ease-in.
-- **Style presets** (ink weight, palette, splash intensity); optional colored line.
+- ✅ **Style controls + presets — DONE (Feature #4).** Ink colour, boldness,
+  draw time, splash intensity, detail level; 3 presets; localStorage. Follow-up:
+  more palettes; a full colour picker.
 - **Custom domain + analytics**; rate-limit `/api` if it goes public.
 
 ## Gotchas / don't-regress

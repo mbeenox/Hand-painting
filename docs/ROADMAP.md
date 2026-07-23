@@ -9,7 +9,7 @@ before moving on. Read `CLAUDE.md` first for architecture/deploy context.
 1. ✅ **Shareable export + recording** — DONE (2026-07-22): PNG + webm/mp4 + Web Share.
 2. ✅ **Polish: processing cue, reveal, audio** — DONE (2026-07-22): spinner, fade-in, synth audio + chime.
 3. ✅ **Variable-width ink strokes** — DONE (2026-07-22): speed-driven ribbon, adaptive width.
-4. **User controls / style presets** — builds on #3 (color/weight/speed).
+4. ✅ **User controls / style presets** — DONE (2026-07-22): ink/boldness/time/splash/detail + presets.
 5. **Face-priority sampling** — backend; fixes "the face is just an outline".
 6. **Rigged .glb hand** — highest effort/risk; do last.
 

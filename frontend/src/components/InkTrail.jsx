@@ -16,7 +16,7 @@
  * strip each update. A hand-rolled ribbon is the right tool for append-only,
  * per-vertex width.)
  */
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
@@ -29,7 +29,9 @@ const TAPER_N = 10;          // centerline points over which the start nib ramps
 const SPEED_DECAY = 0.999;   // adaptation rate of the running max-speed reference
 const INK_Z = 0.011;         // sit just in front of the paper plane
 
-export default function InkTrail({ penTip, speedRef, maxPoints = 16000, active }) {
+export default function InkTrail({
+  penTip, speedRef, inkColor = INK_COLOR, weight = 1, maxPoints = 16000, active,
+}) {
   const state = useRef({
     cnt: 0,
     prev: new THREE.Vector3(Infinity, 0, 0),
@@ -57,9 +59,10 @@ export default function InkTrail({ penTip, speedRef, maxPoints = 16000, active }
   }, [maxPoints]);
 
   const material = useMemo(
-    () => new THREE.MeshBasicMaterial({ color: INK_COLOR, side: THREE.DoubleSide }),
-    []
+    () => new THREE.MeshBasicMaterial({ color: inkColor, side: THREE.DoubleSide }),
+    [] // eslint-disable-line react-hooks/exhaustive-deps -- color synced below
   );
+  useEffect(() => { material.color.set(inkColor); }, [inkColor, material]);
 
   useFrame(() => {
     if (!active) return;
@@ -93,7 +96,7 @@ export default function InkTrail({ penTip, speedRef, maxPoints = 16000, active }
     const speed = (speedRef && speedRef.current) || 0;
     s.maxSpeed = Math.max(s.maxSpeed * SPEED_DECAY, speed);
     const norm = s.maxSpeed > 1e-6 ? Math.min(1, speed / s.maxSpeed) : 0;
-    const target = MAX_HALF - (MAX_HALF - MIN_HALF) * norm;
+    const target = (MAX_HALF - (MAX_HALF - MIN_HALF) * norm) * weight;
     s.w += (target - s.w) * WIDTH_LERP;
 
     const pos = geometry.getAttribute('position');

@@ -6,20 +6,36 @@
  *     └──────────────────────── "draw another" ◀──────────────────────────┘
  *
  * Layers (back → front): WatercolorSplash (SVG) · <Canvas> (hand + ink) · UI.
- * The draw is captured for sharing (useDrawCapture) and optionally scored with
- * synthesized pen-scratch + a completion chime (useDrawSound).
+ * The draw is captured for sharing (useDrawCapture), optionally scored with
+ * synthesized audio (useDrawSound), and styled via the ControlsPanel settings
+ * (persisted to localStorage).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import Scene from './components/Scene.jsx';
 import UploadPanel from './components/UploadPanel.jsx';
 import WatercolorSplash from './components/WatercolorSplash.jsx';
+import ControlsPanel from './components/ControlsPanel.jsx';
 import { useDrawCapture } from './hooks/useDrawCapture.js';
 import { useDrawSound } from './hooks/useDrawSound.js';
 import { processImage } from './api.js';
 
-const DRAW_SECONDS = 30; // total drawing duration; longer feels less rushed
-                         // and, with the pacing envelope, lands cleanly.
+const DEFAULT_SETTINGS = {
+  inkColor: '#141428',
+  weight: 1.0,   // stroke boldness multiplier
+  seconds: 30,   // draw duration
+  splash: 1.0,   // watercolor splash intensity
+  detail: 'std', // 'fine' | 'std' | 'dense' → backend point density
+};
+const SETTINGS_KEY = 'hh-settings-v1';
+
+function loadSettings() {
+  try {
+    const raw = typeof localStorage !== 'undefined' && localStorage.getItem(SETTINGS_KEY);
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return { ...DEFAULT_SETTINGS };
+}
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -40,34 +56,35 @@ const soundBtn = {
 
 export default function App() {
   const [phase, setPhase] = useState('idle'); // idle | processing | drawing | done
-  const [pathData, setPathData] = useState(null); // { points, aspect, ... }
+  const [pathData, setPathData] = useState(null);
   const [error, setError] = useState(null);
-  // Bumping this key remounts splashes + scene → fresh randomness per drawing.
   const [runId, setRunId] = useState(0);
-  const [stillBlob, setStillBlob] = useState(null); // clean, hand-free PNG
+  const [stillBlob, setStillBlob] = useState(null);
   const [soundOn, setSoundOn] = useState(false);
+  const [settings, setSettings] = useState(loadSettings);
 
-  const glElRef = useRef(null);   // the WebGL <canvas> DOM element
-  const splashRef = useRef(null); // wrapper around the splash <svg>
-  const speedRef = useRef(0);     // pen speed (world units/sec), written by Scene
+  const glElRef = useRef(null);
+  const splashRef = useRef(null);
+  const speedRef = useRef(0);
   const soundOnRef = useRef(false);
+  const settingsRef = useRef(settings);
   useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
+  useEffect(() => { settingsRef.current = settings; }, [settings]);
+  useEffect(() => {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* ignore */ }
+  }, [settings]);
 
-  const { start, stop, snapshotPNG, video, recSupported } = useDrawCapture(
-    glElRef,
-    splashRef
-  );
-  const { startScratch, stopScratch, chime, setSoundEnabled } = useDrawSound(
-    soundOnRef,
-    speedRef
-  );
+  const { start, stop, snapshotPNG, video, recSupported } = useDrawCapture(glElRef, splashRef);
+  const { startScratch, stopScratch, chime, setSoundEnabled } = useDrawSound(soundOnRef, speedRef);
+
+  const updateSettings = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), []);
 
   const handleImage = useCallback(async (fileOrBlob) => {
     setError(null);
     setStillBlob(null);
     setPhase('processing');
     try {
-      const data = await processImage(fileOrBlob);
+      const data = await processImage(fileOrBlob, settingsRef.current.detail);
       setPathData(data);
       setRunId((n) => n + 1);
       setPhase('drawing');
@@ -90,7 +107,7 @@ export default function App() {
     const next = !soundOnRef.current;
     soundOnRef.current = next;
     setSoundOn(next);
-    setSoundEnabled(next); // create/resume the AudioContext within this gesture
+    setSoundEnabled(next);
     if (!next) stopScratch();
   }, [setSoundEnabled, stopScratch]);
 
@@ -109,7 +126,7 @@ export default function App() {
 
   useEffect(() => {
     if (phase !== 'done') return undefined;
-    const id = setTimeout(stop, 2600); // end the clip after the hand retreats
+    const id = setTimeout(stop, 2600);
     return () => clearTimeout(id);
   }, [phase, stop]);
 
@@ -147,9 +164,7 @@ export default function App() {
           text: 'My photo, drawn as one continuous line ✍️',
         });
         return;
-      } catch {
-        /* user cancelled or share failed → fall through to a download */
-      }
+      } catch { /* cancelled → download */ }
     }
     downloadBlob(blob, 'hypnotic-hand.png');
   }, [stillBlob, snapshotPNG]);
@@ -157,15 +172,13 @@ export default function App() {
   const shareSupported =
     typeof navigator !== 'undefined' && typeof navigator.share === 'function';
 
-  // Splashes only appear once we're about to draw (they're the base layer the
-  // ink is drawn over), fade in softly, and re-randomize per run via the key.
+  // Draw with the currently chosen style. Captured at draw start (runId/phase
+  // change); ink colour is also in the deps so a finished piece recolours live.
   const showSplash = phase === 'drawing' || phase === 'done';
   const canvas = useMemo(
     () => (
       <Canvas
         key={runId}
-        // alpha:true → paper/splash DOM layers show through the 3D scene.
-        // preserveDrawingBuffer:true → the frame can be read back for export.
         gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
         onCreated={({ gl }) => { glElRef.current = gl.domElement; }}
         camera={{ position: [0, 0, 11], fov: 40 }}
@@ -174,15 +187,18 @@ export default function App() {
         {pathData && (
           <Scene
             pathData={pathData}
-            duration={DRAW_SECONDS}
+            duration={settings.seconds}
             active={phase === 'drawing'}
             onComplete={handleDrawingDone}
             speedRef={speedRef}
+            inkColor={settings.inkColor}
+            weight={settings.weight}
           />
         )}
       </Canvas>
     ),
-    [runId, pathData, phase, handleDrawingDone]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [runId, pathData, phase, handleDrawingDone, settings.inkColor, settings.weight]
   );
 
   return (
@@ -197,7 +213,7 @@ export default function App() {
             className="hh-fade-in"
             style={{ position: 'absolute', inset: 0 }}
           >
-            <WatercolorSplash count={3} />
+            <WatercolorSplash count={3} intensity={settings.splash} />
           </div>
         )}
       </div>
@@ -210,6 +226,9 @@ export default function App() {
       >
         {soundOn ? '🔊' : '🔇'}
       </button>
+      {phase !== 'drawing' && (
+        <ControlsPanel settings={settings} onChange={updateSettings} />
+      )}
       <UploadPanel
         phase={phase}
         error={error}

@@ -59,6 +59,14 @@ TWO_OPT_TIME_BUDGET = 2.0     # more uncrossing for the larger point set; still
 CHAIKIN_ROUNDS = 3
 OUTPUT_POINTS = 2800          # smoother resampled polyline for the denser tour
 
+# Per-request detail presets, chosen via ?detail=… on the endpoint →
+# (max_points, output_points). "std" mirrors the module defaults above.
+DETAIL_LEVELS = {
+    "fine":  (900, 2200),    # sparser, more minimal single line
+    "std":   (MAX_POINTS, OUTPUT_POINTS),
+    "dense": (1900, 3600),   # more coverage → fuller, more detailed
+}
+
 
 # ==========================================================================
 # Step A — Edge detection (identical to backend/main.py)
@@ -82,7 +90,8 @@ def detect_edges(img_bgr: np.ndarray) -> np.ndarray:
 # ==========================================================================
 # Step B — Point sampling (identical grid-hash Poisson-disk thinning)
 # ==========================================================================
-def sample_points(edges: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+def sample_points(edges: np.ndarray, rng: np.random.Generator,
+                  max_points: int = MAX_POINTS) -> np.ndarray:
     ys, xs = np.nonzero(edges)
     if len(xs) < MIN_POINTS:
         raise HTTPException(
@@ -115,7 +124,7 @@ def sample_points(edges: np.ndarray, rng: np.random.Generator) -> np.ndarray:
             if ok:
                 accepted.append(p)
                 grid.setdefault((gx, gy), []).append(p)
-                if len(accepted) > MAX_POINTS * 3:
+                if len(accepted) > max_points * 3:
                     break
         return np.array(accepted)
 
@@ -125,17 +134,17 @@ def sample_points(edges: np.ndarray, rng: np.random.Generator) -> np.ndarray:
         mid = 0.5 * (lo_r + hi_r)
         pts = thin(mid)
         n = len(pts)
-        if MIN_POINTS <= n <= MAX_POINTS:
+        if MIN_POINTS <= n <= max_points:
             best = pts
             break
-        if n > MAX_POINTS:
+        if n > max_points:
             lo_r = mid
-            best = pts[:MAX_POINTS] if best is None else best
+            best = pts[:max_points] if best is None else best
         else:
             hi_r = mid
     if best is None or len(best) < MIN_POINTS:
-        best = pix[:min(MAX_POINTS, len(pix))]
-    return best[:MAX_POINTS]
+        best = pix[:min(max_points, len(pix))]
+    return best[:max_points]
 
 
 # ==========================================================================
@@ -201,7 +210,7 @@ def two_opt(pts: np.ndarray, order: np.ndarray, time_budget: float) -> np.ndarra
 # ==========================================================================
 # Step E — Smoothing: Chaikin corner cutting + arc-length resampling
 # ==========================================================================
-def smooth_path(path: np.ndarray) -> np.ndarray:
+def smooth_path(path: np.ndarray, output_points: int = OUTPUT_POINTS) -> np.ndarray:
     """
     SciPy-free spline smoothing.
 
@@ -234,11 +243,11 @@ def smooth_path(path: np.ndarray) -> np.ndarray:
         mid[1::2] = r
         path = np.vstack([path[:1], mid, path[-1:]])
 
-    # Uniform arc-length resample to OUTPUT_POINTS vertices.
+    # Uniform arc-length resample to output_points vertices.
     chords = np.linalg.norm(np.diff(path, axis=0), axis=1)
     s = np.concatenate([[0.0], np.cumsum(chords)])
     total = s[-1] if s[-1] > 0 else 1.0
-    target = np.linspace(0.0, total, OUTPUT_POINTS)
+    target = np.linspace(0.0, total, output_points)
     x = np.interp(target, s, path[:, 0])
     y = np.interp(target, s, path[:, 1])
     return np.column_stack([x, y])
@@ -254,7 +263,7 @@ def normalize(path: np.ndarray, w: int, h: int):
 # ==========================================================================
 # Endpoint — registered at both the Vercel path and the bare path
 # ==========================================================================
-async def _process(file: UploadFile):
+async def _process(file: UploadFile, detail: str = "std"):
     t_start = time.perf_counter()
     raw = await file.read()
     if not raw:
@@ -262,6 +271,8 @@ async def _process(file: UploadFile):
     img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None:
         raise HTTPException(status_code=415, detail="Could not decode image.")
+
+    max_points, output_points = DETAIL_LEVELS.get(detail, DETAIL_LEVELS["std"])
 
     h, w = img.shape[:2]
     if max(h, w) > MAX_IMAGE_DIM:
@@ -271,12 +282,12 @@ async def _process(file: UploadFile):
 
     rng = np.random.default_rng(int.from_bytes(os.urandom(8), "little"))
 
-    edges = detect_edges(img)                        # A
-    pts = sample_points(edges, rng)                  # B
-    pts = jitter_points(pts, rng)                    # D
-    order = nearest_neighbor_path(pts, rng)          # C
-    path = two_opt(pts, order, TWO_OPT_TIME_BUDGET)  # C
-    path = smooth_path(path)                         # E
+    edges = detect_edges(img)                          # A
+    pts = sample_points(edges, rng, max_points)        # B
+    pts = jitter_points(pts, rng)                      # D
+    order = nearest_neighbor_path(pts, rng)            # C
+    path = two_opt(pts, order, TWO_OPT_TIME_BUDGET)    # C
+    path = smooth_path(path, output_points)            # E
     norm, aspect = normalize(path, w, h)
 
     elapsed = time.perf_counter() - t_start
@@ -294,13 +305,13 @@ async def _process(file: UploadFile):
 
 
 @app.post("/api/process-image")   # path seen when deployed on Vercel
-async def process_image_vercel(file: UploadFile = File(...)):
-    return await _process(file)
+async def process_image_vercel(file: UploadFile = File(...), detail: str = "std"):
+    return await _process(file, detail)
 
 
 @app.post("/process-image")       # path seen under bare local uvicorn
-async def process_image_local(file: UploadFile = File(...)):
-    return await _process(file)
+async def process_image_local(file: UploadFile = File(...), detail: str = "std"):
+    return await _process(file, detail)
 
 
 BUILD_MARKER = "2026-07-21-r2"  # bumped per deploy to verify rollouts
