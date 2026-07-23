@@ -186,6 +186,23 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Feature #6 — stroke violin: the drawing plays itself (2026-07-23)** —
+  with sound on, every stroke is a bowed note: pen lands → note-on, lifts →
+  release. What keeps random strokes musical: pitch = stroke height QUANTIZED
+  to C-major pentatonic over 2 octaves (can't clash); duration = stroke draw
+  time (sub-90ms strokes fold into the ringing note); **vibrato = line
+  curvature** at the pen; bow pressure (lowpass brightness) = pen speed;
+  legato bow-change releases; a quiet C2+G2+C3 triangle drone underneath.
+  Since stroke order is random per run, every drawing performs a different
+  melody. Implementation: `useDrawSound` grew startMusic/stopMusic/noteOn/
+  noteOff (2 detuned saws → lowpass → env per voice, vibrato LFO, 5-voice
+  cap); `usePathAnimation` exposes per-vertex `curveNorm` and `getPoint` now
+  returns the current VERTEX INDEX (≥0 = pen down, −1 = travel — callers
+  updated); `Scene` emits note events on pen-down transitions and publishes
+  curveRef; layered with the pen scratch behind the existing 🔇/🔊 toggle
+  (off by default, gesture-safe). E2E updated to click the sound toggle —
+  full draw with audio active, zero console errors.
+
 - **Edge-detection fix (2026-07-23)** — trace mode drew a great face but
   missed bright/low-contrast regions (user's white-robe-on-white-background
   photo: robe and hood absent). Cause: Canny thresholds from the intensity

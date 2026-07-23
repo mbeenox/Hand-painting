@@ -20,7 +20,8 @@ const PEN_LIFT = 0.42;   // how high (world z) the pen rises on pen-up hops
 const LIFT_RATE = 16;    // exp smoothing rate of the lift (higher = snappier)
 
 export default function Scene({
-  pathData, duration, active, onComplete, speedRef, inkColor, weight,
+  pathData, duration, active, onComplete, speedRef, curveRef,
+  onNoteOn, onNoteOff, inkColor, weight,
 }) {
   const anim = usePathAnimation(
     pathData.points, pathData.aspect, duration, BOARD_SIZE, pathData.breaks
@@ -31,6 +32,7 @@ export default function Scene({
   const prevTip = useRef(new THREE.Vector3()); // last frame's tip → pen speed
   const clock = useRef({ elapsed: 0, done: false });
   const liftRef = useRef(0); // smoothed pen-lift height (trace-mode hops)
+  const prevDown = useRef(false); // pen-down state last frame → stroke events
 
   // Initialize the pen at the path start so the arm doesn't lurch on frame 1.
   useMemo(() => {
@@ -51,12 +53,30 @@ export default function Scene({
     if (clock.current.done) {
       // Drawing finished: exponentially ease the hand off the artwork so
       // the viewer gets an unobstructed look at the finished line portrait.
+      if (prevDown.current) {
+        prevDown.current = false;
+        onNoteOff?.(); // let the final bowed note release
+      }
       penTip.current.lerp(restPoint, 1 - Math.exp(-2.2 * delta));
       if (speedRef) speedRef.current = 0;
       return;
     }
     if (active) clock.current.elapsed += delta;
-    const down = anim.getPoint(clock.current.elapsed, penTip.current);
+    // getPoint returns the current vertex index while inking, -1 in flight.
+    const idx = anim.getPoint(clock.current.elapsed, penTip.current);
+    const down = idx >= 0;
+
+    // Publish local line curvature (drives the violin vibrato) and emit
+    // stroke events: pen lands → note-on pitched by the stroke's height on
+    // the canvas; pen lifts → note release.
+    const curve = down ? anim.curveNorm[idx] : 0;
+    if (curveRef) curveRef.current = curve;
+    if (active && down && !prevDown.current) {
+      onNoteOn?.(penTip.current.y / BOARD_SIZE + 0.5, curve);
+    } else if (active && !down && prevDown.current) {
+      onNoteOff?.();
+    }
+    prevDown.current = down;
 
     // Lift the pen off the paper during pen-up hops (the IK arm follows the
     // tip, so the whole hand rises and repositions like a real artist's).

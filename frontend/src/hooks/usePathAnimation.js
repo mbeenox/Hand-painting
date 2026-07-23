@@ -105,6 +105,11 @@ export function usePathAnimation(points, aspect, duration, boardSize = 8, breaks
     const sorted = Float32Array.from(curvature).sort();
     const p90 = sorted[Math.floor(0.9 * (n - 1))] || 1;
 
+    // Per-vertex normalized curvature, exposed for expression consumers
+    // (the violin vibrato tracks how curved the line is at the pen).
+    const curveNorm = new Float32Array(n);
+    for (let i = 0; i < n; i++) curveNorm[i] = Math.min(1, curvature[i] / p90);
+
     // ------------------------------------------------------------------
     // 3–4. Per-segment durations → cumulative timetable, rescaled.
     // ------------------------------------------------------------------
@@ -147,8 +152,10 @@ export function usePathAnimation(points, aspect, duration, boardSize = 8, breaks
 
     // ------------------------------------------------------------------
     // 5. Runtime sampler: elapsed seconds → world position (binary search).
-    //    Writes into `out` and returns whether the pen is DOWN (inking) —
-    //    false while flying between strokes in trace mode.
+    //    Writes into `out` and returns the CURRENT VERTEX INDEX when the
+    //    pen is down (inking), or -1 while flying between strokes in
+    //    trace mode. (`ret >= 0` ⇒ pen down; the index looks up per-vertex
+    //    data like `curveNorm` for expression.)
     // ------------------------------------------------------------------
     function getPoint(elapsed, out) {
       // Global pacing envelope: warp raw time so the pen cruises and lands.
@@ -162,13 +169,14 @@ export function usePathAnimation(points, aspect, duration, boardSize = 8, breaks
       const span = cumTime[hi] - cumTime[lo] || 1e-6;
       const f = (t - cumTime[lo]) / span;
       out.lerpVectors(worldPoints[lo], worldPoints[hi], f);
-      return !isTravel[Math.min(lo, n - 2)];
+      return isTravel[Math.min(lo, n - 2)] ? -1 : lo;
     }
 
     return {
       getPoint, duration, worldPoints,
-      // Exposed for the exact-append ink renderer (InkTrail):
-      cumTime, isTravel, normals, warp,
+      // Exposed for the exact-append ink renderer (InkTrail) and the
+      // stroke-music expression (curveNorm):
+      cumTime, isTravel, normals, curveNorm, warp,
     };
   }, [points, aspect, duration, boardSize, breaks]);
 }

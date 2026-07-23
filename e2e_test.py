@@ -12,6 +12,10 @@ with sync_playwright() as p:
     page.goto("http://localhost:5173", wait_until="networkidle")
     page.screenshot(path="e2e_1_idle.png")
 
+    # Enable sound (inside a real click gesture) so the stroke-violin path
+    # (AudioContext, drone, note on/off per stroke) is exercised too.
+    page.click("button[aria-label='Enable sound']")
+
     page.set_input_files("input[type=file]", "backend/test_input.png")
     # wait for processing → drawing (overlay disappears)
     page.wait_for_selector("h1", state="detached", timeout=30000)

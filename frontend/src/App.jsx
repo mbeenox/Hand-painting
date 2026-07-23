@@ -67,6 +67,7 @@ export default function App() {
   const glElRef = useRef(null);
   const splashRef = useRef(null);
   const speedRef = useRef(0);
+  const curveRef = useRef(0);
   const soundOnRef = useRef(false);
   const settingsRef = useRef(settings);
   useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
@@ -76,7 +77,10 @@ export default function App() {
   }, [settings]);
 
   const { start, stop, snapshotPNG, video, recSupported } = useDrawCapture(glElRef, splashRef);
-  const { startScratch, stopScratch, chime, setSoundEnabled } = useDrawSound(soundOnRef, speedRef);
+  const {
+    startScratch, stopScratch, startMusic, stopMusic,
+    noteOn, noteOff, chime, setSoundEnabled,
+  } = useDrawSound(soundOnRef, speedRef, curveRef);
 
   const updateSettings = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), []);
 
@@ -101,18 +105,19 @@ export default function App() {
   const reset = useCallback(() => {
     stop();
     stopScratch();
+    stopMusic();
     setStillBlob(null);
     setPathData(null);
     setPhase('idle');
-  }, [stop, stopScratch]);
+  }, [stop, stopScratch, stopMusic]);
 
   const toggleSound = useCallback(() => {
     const next = !soundOnRef.current;
     soundOnRef.current = next;
     setSoundOn(next);
     setSoundEnabled(next);
-    if (!next) stopScratch();
-  }, [setSoundEnabled, stopScratch]);
+    if (!next) { stopScratch(); stopMusic(); }
+  }, [setSoundEnabled, stopScratch, stopMusic]);
 
   // --- capture: record the draw, then grab a clean (hand-free) still ---
   useEffect(() => {
@@ -140,11 +145,17 @@ export default function App() {
     return () => { alive = false; };
   }, [video, snapshotPNG]);
 
-  // --- sound: scratch while drawing (if enabled), chime on completion ---
+  // --- sound: scratch + stroke violin while drawing (if enabled),
+  //     chime on completion ---
   useEffect(() => {
-    if (phase === 'drawing' && soundOn) startScratch();
-    else stopScratch();
-  }, [phase, soundOn, startScratch, stopScratch]);
+    if (phase === 'drawing' && soundOn) {
+      startScratch();
+      startMusic();
+    } else {
+      stopScratch();
+      stopMusic();
+    }
+  }, [phase, soundOn, startScratch, stopScratch, startMusic, stopMusic]);
 
   useEffect(() => {
     if (phase === 'done' && soundOn) chime();
@@ -194,6 +205,9 @@ export default function App() {
             active={phase === 'drawing'}
             onComplete={handleDrawingDone}
             speedRef={speedRef}
+            curveRef={curveRef}
+            onNoteOn={noteOn}
+            onNoteOff={noteOff}
             inkColor={settings.inkColor}
             weight={settings.weight}
           />
