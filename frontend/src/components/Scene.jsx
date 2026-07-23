@@ -71,8 +71,9 @@ export default function Scene({ pathData, duration, active, onComplete, speedRef
       <directionalLight position={[-6, -2, 4]} intensity={0.3} />
 
       {/* maxPoints sized so even a 30s draw on a 240Hz display never
-          truncates the line (≈7.2k samples worst case). */}
-      <InkTrail penTip={penTip} maxPoints={16000} active={active} />
+          truncates the line (≈7.2k samples worst case). speedRef drives the
+          variable stroke width. */}
+      <InkTrail penTip={penTip} speedRef={speedRef} maxPoints={16000} active={active} />
       <HandRig penTip={penTip} boardSize={BOARD_SIZE} />
     </>
   );

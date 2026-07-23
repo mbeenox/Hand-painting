@@ -145,14 +145,24 @@ Hard-won deployment facts (do **not** regress):
   respect autoplay. New `hooks/useDrawSound.js`; `Scene.jsx` publishes pen speed
   via a ref; keyframes in `index.html`; honors `prefers-reduced-motion`.
 
+- **Feature #3 — variable-width ink (2026-07-22)** — replaced the uniform GL
+  hairline with a hand-rolled triangle-strip **ribbon** the pen extrudes as it
+  moves: half-width tracks pen speed, normalized adaptively against the fastest
+  sweep so far so the full thin→bold range always shows (near-stopped pen and
+  curves → bold; fast straights → hairline), with a tapered nib start. Keeps the
+  append-only discipline — one preallocated buffer, static prefilled indices,
+  incremental `drawRange` growth, no per-frame rebuilds. `InkTrail.jsx` rewritten;
+  `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
+  the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
+
 ## Roadmap — remaining ideas (not yet done)
 
 - ✅ **Save/share the result — DONE (Feature #1).** PNG + video export + Web
   Share on the done screen. Follow-ups if wanted: GIF output; a subtle
   watermark; higher-fps capture on capable devices; include the hand in an
   optional "making of" clip variant.
-- **Variable-width / pressure strokes** (Line2 or meshline) for a real ink feel
-  instead of a uniform hairline.
+- ✅ **Variable-width strokes — DONE (Feature #3).** Speed-driven ribbon with
+  adaptive normalization + tapered nib. Follow-up: a soft-edge/ink-bleed shader.
 - **Face-priority sampling** — weight sampled points toward a detected face so
   portraits keep eyes/nose/mouth, not just an outline.
 - **Rigged hand `.glb`** in HandRig's marked GLTF slot, driven by the same IK solve.

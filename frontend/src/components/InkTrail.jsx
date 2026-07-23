@@ -1,77 +1,129 @@
 /**
- * InkTrail — the growing ink line left behind by the pen tip.
+ * InkTrail — the growing ink stroke left behind by the pen tip, as a
+ * VARIABLE-WIDTH ribbon (Feature #3).
  *
- * Technique: ONE preallocated BufferGeometry position attribute of
- * `maxPoints` vertices. Every frame we copy the pen tip's current
- * position into the next free slot and advance `geometry.drawRange`,
- * so the GPU only renders the vertices written so far. This is the
- * cheapest possible "growing line": zero allocation, zero geometry
- * rebuilds — just a partial buffer upload per frame (we mark only the
- * updated range via `addUpdateRange`).
+ * The pen path lives in the z=0 plane, so the stroke is a flat 2D ribbon: for
+ * each new centerline point we extrude two edge vertices ±(halfWidth · normal),
+ * where the normal is perpendicular to the local tangent. The half-width tracks
+ * pen speed — slow, deliberate passes read as a heavier nib; fast sweeps thin
+ * out — and ramps up over the first few points for a tapered start.
  *
- * (Drei's <Line> / Line2 would give fat screen-space strokes, but its
- * LineGeometry.setPositions() reallocates instanced buffers on every
- * update — wasteful at 60 fps. A native THREE.Line with drawRange is
- * the right tool for an append-only polyline; to fake a slightly
- * heavier "micron pen" stroke we render 3 copies nudged ~half a pixel.)
+ * Performance discipline (kept from the original hairline version): ONE
+ * preallocated position buffer (2 vertices per centerline point), a STATIC
+ * prefilled triangle index buffer, and incremental per-frame uploads via
+ * drawRange growth + addUpdateRange — no geometry rebuilds at 60fps. (Drei's
+ * Line2 gives fat strokes but only a UNIFORM width; meshline rebuilds the whole
+ * strip each update. A hand-rolled ribbon is the right tool for append-only,
+ * per-vertex width.)
  */
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 const INK_COLOR = '#141428'; // near-black blue, micron-pen style
-const MIN_STEP = 0.0025;     // world units — skip vertices when pen is idle
-                             // (denser than before → smoother, fuller line)
+const MIN_STEP = 0.0025;     // min centerline spacing (world units)
+const MIN_HALF = 0.009;      // thinnest half-width (fastest sweeps)
+const MAX_HALF = 0.034;      // widest half-width (slow pen / curves / stroke ends)
+const WIDTH_LERP = 0.22;     // low-pass on width → smooth taper, no jitter
+const TAPER_N = 10;          // centerline points over which the start nib ramps
+const SPEED_DECAY = 0.999;   // adaptation rate of the running max-speed reference
+const INK_Z = 0.011;         // sit just in front of the paper plane
 
-export default function InkTrail({ penTip, maxPoints = 16000, active }) {
-  const lineRefs = [useRef(), useRef(), useRef()];
-  const state = useRef({ count: 0, last: new THREE.Vector3(Infinity, 0, 0) });
+export default function InkTrail({ penTip, speedRef, maxPoints = 16000, active }) {
+  const state = useRef({
+    cnt: 0,
+    prev: new THREE.Vector3(Infinity, 0, 0),
+    w: MIN_HALF,
+    maxSpeed: 1e-6,
+  });
 
-  // One shared, preallocated position buffer for all three line copies.
   const geometry = useMemo(() => {
+    const maxCenter = maxPoints;
     const g = new THREE.BufferGeometry();
-    const attr = new THREE.BufferAttribute(new Float32Array(maxPoints * 3), 3);
-    attr.setUsage(THREE.DynamicDrawUsage);
-    g.setAttribute('position', attr);
+    const pos = new THREE.BufferAttribute(new Float32Array(maxCenter * 2 * 3), 3);
+    pos.setUsage(THREE.DynamicDrawUsage);
+    g.setAttribute('position', pos);
+    // Static triangle indices for every possible segment (2 tris per quad).
+    const idx = new Uint32Array(Math.max(0, maxCenter - 1) * 6);
+    for (let k = 0; k < maxCenter - 1; k++) {
+      const a = 2 * k, b = 2 * k + 1, c = 2 * k + 2, d = 2 * k + 3;
+      const o = k * 6;
+      idx[o] = a; idx[o + 1] = b; idx[o + 2] = c;
+      idx[o + 3] = b; idx[o + 4] = d; idx[o + 5] = c;
+    }
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
     g.setDrawRange(0, 0);
     return g;
   }, [maxPoints]);
 
   const material = useMemo(
-    () => new THREE.LineBasicMaterial({ color: INK_COLOR }),
+    () => new THREE.MeshBasicMaterial({ color: INK_COLOR, side: THREE.DoubleSide }),
     []
   );
 
   useFrame(() => {
     if (!active) return;
     const s = state.current;
+    if (s.cnt >= maxPoints) return;
     const tip = penTip.current;
-    if (s.count >= maxPoints) return;
-    // Only record a vertex once the pen has actually moved a little —
-    // keeps the buffer from filling with duplicates while easing slowly.
-    if (tip.distanceTo(s.last) < MIN_STEP && s.count > 0) return;
 
-    const attr = geometry.getAttribute('position');
-    attr.setXYZ(s.count, tip.x, tip.y, 0.01); // slightly in front of paper
-    s.last.copy(tip);
-    s.count += 1;
+    // First qualifying frame: remember the start, defer vertices until we have
+    // a direction to orient the ribbon.
+    if (s.cnt === 0) {
+      s.prev.copy(tip);
+      s.cnt = 1;
+      return;
+    }
 
-    // Upload only the vertex we just wrote, then extend the draw range.
-    attr.clearUpdateRanges();
-    attr.addUpdateRange((s.count - 1) * 3, 3);
-    attr.needsUpdate = true;
-    geometry.setDrawRange(0, s.count);
+    const dx = tip.x - s.prev.x;
+    const dy = tip.y - s.prev.y;
+    const len = Math.hypot(dx, dy);
+    if (len < MIN_STEP) return; // pen barely moved → skip (no dupes when easing)
+
+    // Unit tangent → unit normal (perpendicular, in the z=0 plane).
+    const tx = dx / len;
+    const ty = dy / len;
+    const nx = -ty;
+    const ny = tx;
+
+    // Half-width from pen speed, normalized adaptively against the fastest
+    // stroke so far so the full thin→bold range is always used (a near-stopped
+    // pen → thickest; the fastest sweep → thinnest). Low-passed for a smooth
+    // taper so the width never jitters.
+    const speed = (speedRef && speedRef.current) || 0;
+    s.maxSpeed = Math.max(s.maxSpeed * SPEED_DECAY, speed);
+    const norm = s.maxSpeed > 1e-6 ? Math.min(1, speed / s.maxSpeed) : 0;
+    const target = MAX_HALF - (MAX_HALF - MIN_HALF) * norm;
+    s.w += (target - s.w) * WIDTH_LERP;
+
+    const pos = geometry.getAttribute('position');
+    const newIdx = s.cnt; // this point's centerline index
+    const taper = (i) => Math.min(1, i / TAPER_N);
+    const writeVertex = (i, px, py, half) => {
+      pos.setXYZ(2 * i, px + nx * half, py + ny * half, INK_Z);
+      pos.setXYZ(2 * i + 1, px - nx * half, py - ny * half, INK_Z);
+    };
+
+    let updStart = 2 * newIdx * 3;
+    let updLen = 6;
+    if (newIdx === 1) {
+      // Center 0 was deferred; write it now with this segment's normal.
+      writeVertex(0, s.prev.x, s.prev.y, s.w * taper(0));
+      updStart = 0;
+      updLen = 12;
+    }
+    writeVertex(newIdx, tip.x, tip.y, s.w * taper(newIdx));
+
+    geometry.setDrawRange(0, newIdx * 6); // centers 0..newIdx → newIdx segments
+    pos.clearUpdateRanges();
+    pos.addUpdateRange(updStart, updLen);
+    pos.needsUpdate = true;
+
+    s.prev.copy(tip);
+    s.cnt += 1;
   });
 
-  // Three overlapping copies with sub-pixel world offsets → a stroke that
-  // reads ~2px wide, like a 0.3mm fineliner, without Line2's overhead.
-  const offsets = [0, 0.006, -0.006];
-  return (
-    <group>
-      {offsets.map((o, i) => (
-        <line key={i} ref={lineRefs[i]} geometry={geometry} material={material}
-              position={[o, o * 0.6, 0]} />
-      ))}
-    </group>
-  );
+  // Always on-screen; skip frustum culling so we never compute a bounding
+  // sphere over the growing buffer every frame.
+  return <mesh geometry={geometry} material={material} frustumCulled={false} />;
 }
