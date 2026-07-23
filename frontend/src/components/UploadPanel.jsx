@@ -110,7 +110,13 @@ export default function UploadPanel({
       {error && <p style={styles.err}>⚠ {error}</p>}
 
       {phase === 'processing' ? (
-        <p style={styles.sub}>Tracing your portrait…</p>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+          <svg width="46" height="46" viewBox="0 0 46 46" className="hh-spin" aria-hidden="true">
+            <circle cx="23" cy="23" r="19" fill="none" stroke="#1a1a2e" strokeOpacity="0.15" strokeWidth="3" />
+            <path d="M23 4 a19 19 0 0 1 19 19" fill="none" stroke="#1a1a2e" strokeWidth="3" strokeLinecap="round" />
+          </svg>
+          <p style={styles.sub}>Tracing your portrait…</p>
+        </div>
       ) : cameraOn ? (
         <>
           <video ref={videoRef} autoPlay playsInline muted style={styles.video} />

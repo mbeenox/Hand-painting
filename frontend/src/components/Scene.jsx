@@ -17,16 +17,20 @@ import { usePathAnimation } from '../hooks/usePathAnimation.js';
 
 const BOARD_SIZE = 8; // world units spanned by the drawing's longest side
 
-export default function Scene({ pathData, duration, active, onComplete }) {
+export default function Scene({ pathData, duration, active, onComplete, speedRef }) {
   const anim = usePathAnimation(pathData.points, pathData.aspect, duration, BOARD_SIZE);
 
   // The single shared pen-tip position (world space, z=0 drawing plane).
   const penTip = useRef(new THREE.Vector3());
+  const prevTip = useRef(new THREE.Vector3()); // last frame's tip → pen speed
   const clock = useRef({ elapsed: 0, done: false });
 
   // Initialize the pen at the path start so the arm doesn't lurch on frame 1.
   useMemo(() => {
-    if (anim) anim.getPoint(0, penTip.current);
+    if (anim) {
+      anim.getPoint(0, penTip.current);
+      prevTip.current.copy(penTip.current);
+    }
   }, [anim]);
 
   // Where the hand retreats to after signing off (off-canvas bottom-right).
@@ -41,10 +45,18 @@ export default function Scene({ pathData, duration, active, onComplete }) {
       // Drawing finished: exponentially ease the hand off the artwork so
       // the viewer gets an unobstructed look at the finished line portrait.
       penTip.current.lerp(restPoint, 1 - Math.exp(-2.2 * delta));
+      if (speedRef) speedRef.current = 0;
       return;
     }
     if (active) clock.current.elapsed += delta;
     anim.getPoint(clock.current.elapsed, penTip.current);
+    // Publish pen speed (world units/sec) for the optional pen-scratch audio.
+    if (speedRef) {
+      speedRef.current = active
+        ? penTip.current.distanceTo(prevTip.current) / Math.max(delta, 1e-4)
+        : 0;
+    }
+    prevTip.current.copy(penTip.current);
     if (active && clock.current.elapsed >= duration) {
       clock.current.done = true;
       onComplete?.();

@@ -7,7 +7,7 @@ before moving on. Read `CLAUDE.md` first for architecture/deploy context.
 ## Recommended sequence (impact ÷ effort)
 
 1. ✅ **Shareable export + recording** — DONE (2026-07-22): PNG + webm/mp4 + Web Share.
-2. **Polish: processing cue, reveal, audio** — cheap, makes the flow feel premium.
+2. ✅ **Polish: processing cue, reveal, audio** — DONE (2026-07-22): spinner, fade-in, synth audio + chime.
 3. **Variable-width ink strokes** — biggest single visual jump.
 4. **User controls / style presets** — builds on #3 (color/weight/speed).
 5. **Face-priority sampling** — backend; fixes "the face is just an outline".

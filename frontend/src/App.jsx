@@ -5,13 +5,9 @@
  *     ▲                                                                  │
  *     └──────────────────────── "draw another" ◀──────────────────────────┘
  *
- * Layers (back → front):
- *   1. WatercolorSplash — randomized CSS/SVG blobs (the "splash hook")
- *   2. <Canvas>          — transparent-background R3F scene (hand + ink)
- *   3. UploadPanel       — DOM UI overlay
- *
- * The draw is also captured (paper + splash + ink) as a shareable PNG and video
- * via useDrawCapture — see that hook for the compositing rationale.
+ * Layers (back → front): WatercolorSplash (SVG) · <Canvas> (hand + ink) · UI.
+ * The draw is captured for sharing (useDrawCapture) and optionally scored with
+ * synthesized pen-scratch + a completion chime (useDrawSound).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
@@ -19,6 +15,7 @@ import Scene from './components/Scene.jsx';
 import UploadPanel from './components/UploadPanel.jsx';
 import WatercolorSplash from './components/WatercolorSplash.jsx';
 import { useDrawCapture } from './hooks/useDrawCapture.js';
+import { useDrawSound } from './hooks/useDrawSound.js';
 import { processImage } from './api.js';
 
 const DRAW_SECONDS = 30; // total drawing duration; longer feels less rushed
@@ -35,6 +32,12 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
+const soundBtn = {
+  position: 'absolute', top: 16, left: 16, zIndex: 11,
+  width: 44, height: 44, borderRadius: 999, border: '2px solid #1a1a2e',
+  background: '#fff', color: '#1a1a2e', cursor: 'pointer', fontSize: 18, lineHeight: 1,
+};
+
 export default function App() {
   const [phase, setPhase] = useState('idle'); // idle | processing | drawing | done
   const [pathData, setPathData] = useState(null); // { points, aspect, ... }
@@ -42,12 +45,21 @@ export default function App() {
   // Bumping this key remounts splashes + scene → fresh randomness per drawing.
   const [runId, setRunId] = useState(0);
   const [stillBlob, setStillBlob] = useState(null); // clean, hand-free PNG
+  const [soundOn, setSoundOn] = useState(false);
 
   const glElRef = useRef(null);   // the WebGL <canvas> DOM element
   const splashRef = useRef(null); // wrapper around the splash <svg>
+  const speedRef = useRef(0);     // pen speed (world units/sec), written by Scene
+  const soundOnRef = useRef(false);
+  useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
+
   const { start, stop, snapshotPNG, video, recSupported } = useDrawCapture(
     glElRef,
     splashRef
+  );
+  const { startScratch, stopScratch, chime, setSoundEnabled } = useDrawSound(
+    soundOnRef,
+    speedRef
   );
 
   const handleImage = useCallback(async (fileOrBlob) => {
@@ -68,13 +80,21 @@ export default function App() {
   const handleDrawingDone = useCallback(() => setPhase('done'), []);
   const reset = useCallback(() => {
     stop();
+    stopScratch();
     setStillBlob(null);
     setPathData(null);
     setPhase('idle');
-  }, [stop]);
+  }, [stop, stopScratch]);
 
-  // Record the draw: start once the GL canvas exists, stop a beat after
-  // completion so the clip ends on the finished art (hand already retreated).
+  const toggleSound = useCallback(() => {
+    const next = !soundOnRef.current;
+    soundOnRef.current = next;
+    setSoundOn(next);
+    setSoundEnabled(next); // create/resume the AudioContext within this gesture
+    if (!next) stopScratch();
+  }, [setSoundEnabled, stopScratch]);
+
+  // --- capture: record the draw, then grab a clean (hand-free) still ---
   useEffect(() => {
     if (phase !== 'drawing') return undefined;
     let raf;
@@ -89,22 +109,26 @@ export default function App() {
 
   useEffect(() => {
     if (phase !== 'done') return undefined;
-    const id = setTimeout(stop, 2600);
+    const id = setTimeout(stop, 2600); // end the clip after the hand retreats
     return () => clearTimeout(id);
   }, [phase, stop]);
 
-  // Once recording has stopped (hand off-canvas), grab a clean still to reuse
-  // for Save/Share so the exported image never contains the retreating hand.
   useEffect(() => {
     if (!video) return undefined;
     let alive = true;
-    snapshotPNG().then((b) => {
-      if (alive && b) setStillBlob(b);
-    });
-    return () => {
-      alive = false;
-    };
+    snapshotPNG().then((b) => { if (alive && b) setStillBlob(b); });
+    return () => { alive = false; };
   }, [video, snapshotPNG]);
+
+  // --- sound: scratch while drawing (if enabled), chime on completion ---
+  useEffect(() => {
+    if (phase === 'drawing' && soundOn) startScratch();
+    else stopScratch();
+  }, [phase, soundOn, startScratch, stopScratch]);
+
+  useEffect(() => {
+    if (phase === 'done' && soundOn) chime();
+  }, [phase, soundOn, chime]);
 
   const downloadImage = useCallback(async () => {
     const blob = stillBlob || (await snapshotPNG());
@@ -133,19 +157,17 @@ export default function App() {
   const shareSupported =
     typeof navigator !== 'undefined' && typeof navigator.share === 'function';
 
-  // Splashes only appear once we're about to draw (they're the base layer
-  // the ink is drawn over), and re-randomize per run via the key.
+  // Splashes only appear once we're about to draw (they're the base layer the
+  // ink is drawn over), fade in softly, and re-randomize per run via the key.
   const showSplash = phase === 'drawing' || phase === 'done';
   const canvas = useMemo(
     () => (
       <Canvas
         key={runId}
-        // alpha:true → the paper/splash DOM layers show through the 3D scene.
+        // alpha:true → paper/splash DOM layers show through the 3D scene.
         // preserveDrawingBuffer:true → the frame can be read back for export.
         gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
-        onCreated={({ gl }) => {
-          glElRef.current = gl.domElement;
-        }}
+        onCreated={({ gl }) => { glElRef.current = gl.domElement; }}
         camera={{ position: [0, 0, 11], fov: 40 }}
         style={{ position: 'absolute', inset: 0 }}
       >
@@ -155,6 +177,7 @@ export default function App() {
             duration={DRAW_SECONDS}
             active={phase === 'drawing'}
             onComplete={handleDrawingDone}
+            speedRef={speedRef}
           />
         )}
       </Canvas>
@@ -168,9 +191,25 @@ export default function App() {
         ref={splashRef}
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
       >
-        {showSplash && <WatercolorSplash key={`splash-${runId}`} count={3} />}
+        {showSplash && (
+          <div
+            key={`splash-${runId}`}
+            className="hh-fade-in"
+            style={{ position: 'absolute', inset: 0 }}
+          >
+            <WatercolorSplash count={3} />
+          </div>
+        )}
       </div>
       {canvas}
+      <button
+        onClick={toggleSound}
+        aria-label={soundOn ? 'Mute sound' : 'Enable sound'}
+        title={soundOn ? 'Sound on' : 'Sound off'}
+        style={soundBtn}
+      >
+        {soundOn ? '🔊' : '🔇'}
+      </button>
       <UploadPanel
         phase={phase}
         error={error}

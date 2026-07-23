@@ -137,6 +137,14 @@ Hard-won deployment facts (do **not** regress):
   runs on a capped 960px/24fps compositing canvas so it can't jank the
   time-based draw. Graceful fallbacks where `MediaRecorder`/Web Share are absent.
 
+- **Feature #2 — polish (2026-07-22)** — the processing wait now shows a
+  self-drawing spinner ("Tracing your portrait…"); the watercolor splashes fade
+  in on reveal; and optional, fully synthesized audio (Web Audio, no asset
+  files) adds a pen-scratch whose volume tracks pen speed plus a soft completion
+  chime — off by default behind a 🔇/🔊 toggle, started inside the gesture to
+  respect autoplay. New `hooks/useDrawSound.js`; `Scene.jsx` publishes pen speed
+  via a ref; keyframes in `index.html`; honors `prefers-reduced-motion`.
+
 ## Roadmap — remaining ideas (not yet done)
 
 - ✅ **Save/share the result — DONE (Feature #1).** PNG + video export + Web
@@ -148,7 +156,9 @@ Hard-won deployment facts (do **not** regress):
 - **Face-priority sampling** — weight sampled points toward a detected face so
   portraits keep eyes/nose/mouth, not just an outline.
 - **Rigged hand `.glb`** in HandRig's marked GLTF slot, driven by the same IK solve.
-- **Adaptive duration** scaled to path length; a subtle progress cue; pen-scratch audio.
+- ✅ **Polish — DONE (Feature #2):** processing spinner, splash fade-in reveal,
+  synth pen-scratch audio + completion chime (off by default), reduced-motion.
+  Remaining here: **adaptive duration** scaled to path length; a camera ease-in.
 - **Style presets** (ink weight, palette, splash intensity); optional colored line.
 - **Custom domain + analytics**; rate-limit `/api` if it goes public.
 
