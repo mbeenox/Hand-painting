@@ -5,12 +5,17 @@ from playwright.sync_api import sync_playwright
 errors = []
 with sync_playwright() as p:
     browser = p.chromium.launch()
-    page = browser.new_page(viewport={"width": 1280, "height": 800})
+    page = browser.new_page(viewport={"width": 1280, "height": 800},
+                            accept_downloads=True)
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(str(e)))
 
     page.goto("http://localhost:5173", wait_until="networkidle")
     page.screenshot(path="e2e_1_idle.png")
+
+    # Feature 1.1: the idle screen offers the bundled sample chips.
+    chips = page.query_selector_all("button[aria-label^='Draw sample']")
+    assert len(chips) == 2, f"expected 2 sample chips, found {len(chips)}"
 
     # Enable sound (inside a real click gesture) so the stroke-violin path
     # (AudioContext, drone, note on/off per stroke) is exercised too.
@@ -23,10 +28,12 @@ with sync_playwright() as p:
     page.screenshot(path="e2e_2_drawing_3s.png")
     time.sleep(8)
     page.screenshot(path="e2e_3_drawing_11s.png")
-    time.sleep(13)
+    # Adaptive duration (Feature 1.3): the synthetic test image's std-trace
+    # pathLength ≈ 52u → auto ≈ 33s (was a fixed 30s).
+    time.sleep(24)
     page.screenshot(path="e2e_4_done.png")
 
-    # Wait out the rest of the 30s draw + the 2.6s post-done capture stop,
+    # Wait out the rest of the ~33s draw + the 2.6s post-done capture stop,
     # then verify the recorded video BLOB really contains an audio track:
     # mp4 (preferred — iPhone-safe H.264+AAC) muxes an "mp4a" sample entry;
     # webm (fallback) muxes Opus → an "OpusHead" init segment.
@@ -58,6 +65,33 @@ with sync_playwright() as p:
     )
     print("saved video:", result)
     assert result["audio"], "recorded video is missing its audio track!"
+
+    # Feature 1.2: the exported still carries the watermark caption
+    # (bottom-right, ink-blue @45% over paper → a bluish mid-tone that neither
+    # the near-black ink strokes nor the pastel splash produce there).
+    with page.expect_download() as dl_info:
+        page.click("text=Save image ↓")
+    dl_info.value.save_as("e2e_export.png")
+    from PIL import Image
+    im = Image.open("e2e_export.png").convert("RGB")
+    w, h = im.size
+    box = im.crop((int(w * 0.55), int(h * 0.94), w, h))
+    wm_px = sum(
+        1 for r, g, b in box.getdata()
+        if 110 <= r <= 190 and 120 <= g <= 200 and 140 <= b <= 210 and b > r
+    )
+    print("watermark-ish pixels in bottom-right box:", wm_px)
+    assert wm_px > 40, "export watermark not found in the saved PNG!"
+
+    # Feature 1.1 end-to-end: draw another → one click on a sample chip must
+    # reach a live drawing (no upload dialog involved).
+    page.click("text=Draw another ↺")
+    page.wait_for_selector("button[aria-label^='Draw sample']", timeout=10000)
+    page.click("button[aria-label^='Draw sample']")
+    page.wait_for_selector("h1", state="detached", timeout=30000)
+    time.sleep(3)
+    page.screenshot(path="e2e_5_sample_drawing.png")
+
     browser.close()
 
 print("console/page errors:", errors if errors else "none")

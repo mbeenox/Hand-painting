@@ -17,6 +17,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const PAPER = '#f6f1e7';
+// Export watermark (Feature 1.2): every shared clip/still names its source.
+// Drawn ONLY in composite() — the one path every export (PNG, video, and any
+// future GIF) flows through — so the on-screen canvas never shows it.
+const WATERMARK = 'drawn & composed at hand-painting-one.vercel.app';
+const WM_INK = 'rgba(30, 58, 95, 0.45)'; // ink-blue @ 45%
 const PNG_MAX = 1600;   // long-side cap for the still image
 const VIDEO_MAX = 960;  // long-side cap for the recording (keeps encoding light)
 const VIDEO_FPS = 24;
@@ -103,6 +108,20 @@ export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, pa
       if (splashImg) { try { ctx.drawImage(splashImg, 0, 0, w, h); } catch { /* noop */ } }
       const el = canvasElRef.current;
       if (el) { try { ctx.drawImage(el, 0, 0, w, h); } catch { /* noop */ } }
+      // Watermark last, above every layer. Size scales with the canvas so it
+      // stays legible from a 480px GIF up to the 1600px still (~2.2% of
+      // height, floored for tiny canvases).
+      try {
+        const size = Math.max(10, Math.round(h * 0.022));
+        const pad = Math.round(size * 0.9);
+        ctx.save();
+        ctx.font = `italic ${size}px Georgia, serif`;
+        ctx.fillStyle = WM_INK;
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(WATERMARK, w - pad, h - pad);
+        ctx.restore();
+      } catch { /* export still succeeds unwatermarked */ }
     },
     [canvasElRef, paper]
   );

@@ -1,8 +1,19 @@
 /**
  * UploadPanel — DOM overlay for image input (file upload OR camera
  * snapshot via getUserMedia) and run-state feedback.
+ *
+ * Also hosts the "…or watch a sample" chips (Feature 1.1): two bundled
+ * license-safe portraits (NASA astronaut portrait — public domain; Vermeer's
+ * Girl with a Pearl Earring — public domain) fetched same-origin from
+ * /samples/ and fed through the exact same onImage path as an upload, so a
+ * cold visitor reaches a live drawing in one click.
  */
 import React, { useCallback, useRef, useState } from 'react';
+
+const SAMPLES = [
+  { src: '/samples/astronaut.jpg', label: 'Astronaut' },
+  { src: '/samples/pearl.jpg', label: 'Pearl Earring' },
+];
 
 const styles = {
   overlay: {
@@ -29,6 +40,14 @@ const styles = {
   sub: { fontSize: 16, color: '#5a5a6e', margin: 0 },
   err: { color: '#b3402a', fontSize: 15 },
   video: { borderRadius: 12, maxWidth: '70vw', maxHeight: '50vh' },
+  sampleRow: { display: 'flex', alignItems: 'center', gap: 12, marginTop: 4 },
+  sampleHint: { fontSize: 14, color: '#5a5a6e' },
+  sampleChip: {
+    padding: 0, width: 56, height: 56, borderRadius: 12, overflow: 'hidden',
+    border: '2px solid #1a1a2e', background: '#fff', cursor: 'pointer',
+    display: 'block', lineHeight: 0,
+  },
+  sampleImg: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
 };
 
 export default function UploadPanel({
@@ -41,6 +60,17 @@ export default function UploadPanel({
   const [cameraOn, setCameraOn] = useState(false);
 
   const pickFile = () => fileRef.current?.click();
+
+  // Same-origin fetch → blob → the normal upload pipeline. No backend change.
+  const pickSample = useCallback(async (src) => {
+    try {
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`sample HTTP ${res.status}`);
+      onImage(await res.blob());
+    } catch {
+      console.warn('Sample image unavailable:', src);
+    }
+  }, [onImage]);
   const onFile = (e) => {
     const f = e.target.files?.[0];
     if (f) onImage(f);
@@ -126,10 +156,26 @@ export default function UploadPanel({
           </div>
         </>
       ) : (
-        <div style={{ display: 'flex', gap: 12 }}>
-          <button style={styles.button} onClick={pickFile}>Upload photo</button>
-          <button style={styles.button} onClick={startCamera}>Use camera</button>
-        </div>
+        <>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button style={styles.button} onClick={pickFile}>Upload photo</button>
+            <button style={styles.button} onClick={startCamera}>Use camera</button>
+          </div>
+          <div style={styles.sampleRow}>
+            <span style={styles.sampleHint}>…or watch a sample</span>
+            {SAMPLES.map((s) => (
+              <button
+                key={s.src}
+                style={styles.sampleChip}
+                title={`Draw the ${s.label} sample`}
+                aria-label={`Draw sample: ${s.label}`}
+                onClick={() => pickSample(s.src)}
+              >
+                <img src={s.src} alt={s.label} style={styles.sampleImg} loading="lazy" />
+              </button>
+            ))}
+          </div>
+        </>
       )}
 
       <input

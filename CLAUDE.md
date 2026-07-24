@@ -186,6 +186,25 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Phase 1 — "Complete the loop" (2026-07-24)** — three S features from
+  `docs/PLAN.md`, shipped together:
+  (a) **Try-a-sample (1.1)** — two license-safe portraits bundled in
+  `frontend/public/samples/` (NASA official portrait of Mae Jemison
+  s87-45893, public domain; Vermeer's *Girl with a Pearl Earring*, public
+  domain via Wikimedia Commons), 720px JPEG ≈ 136 KB total. Idle screen adds
+  "…or watch a sample" chips → same-origin fetch → blob → the existing
+  `onImage` path. Cold visitor reaches a live drawing in one click.
+  (b) **Export watermark (1.2)** — `useDrawCapture.composite()` (the one
+  path every export flows through) draws `drawn & composed at
+  hand-painting-one.vercel.app` bottom-right, Georgia italic, 2.2% of canvas
+  height, ink-blue @45%. On-screen canvas untouched; PNG + video both carry it.
+  (c) **Adaptive draw duration (1.3)** — `autoDrawSeconds(pathLength)` =
+  clamp(round(len/1.6 u/s), 20, 42) in `App.jsx`; `settings.autoTime`
+  (default ON) + Auto/Manual toggle on the Draw-time row (slider disabled
+  while auto). Measured: synthetic test 52u→33s, astronaut 39u→24s,
+  pearl 44u→27s. E2E updated: sample-chip presence + one-click sample→drawing,
+  watermark pixel assertion on the downloaded PNG, timings for ~33s draws.
+
 - **iPhone-playable video (2026-07-23)** — saved videos now prefer MP4
   (H.264+AAC): .webm shared to an iPhone often won't play (partial Safari
   WebM support; Photos/iMessage reject it). `VIDEO_MIMES` order: explicit
@@ -308,7 +327,7 @@ Hard-won deployment facts (do **not** regress):
 - **Rigged hand `.glb`** in HandRig's marked GLTF slot, driven by the same IK solve.
 - ✅ **Polish — DONE (Feature #2):** processing spinner, splash fade-in reveal,
   synth pen-scratch audio + completion chime (off by default), reduced-motion.
-  Remaining here: **adaptive duration** scaled to path length; a camera ease-in.
+  Remaining here: a camera ease-in. (✅ adaptive duration shipped 2026-07-24, Phase 1.)
 - ✅ **Style controls + presets — DONE (Feature #4).** Ink colour, boldness,
   draw time, splash intensity, detail level; 3 presets; localStorage. Follow-up:
   more palettes; a full colour picker.

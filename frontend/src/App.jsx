@@ -23,7 +23,8 @@ import { processImage } from './api.js';
 const DEFAULT_SETTINGS = {
   inkColor: '#141428',
   weight: 1.0,   // stroke boldness multiplier
-  seconds: 30,   // draw duration
+  seconds: 30,   // draw duration (manual, when autoTime is off)
+  autoTime: true, // adapt duration to the drawing's path length (Feature 1.3)
   splash: 1.0,   // watercolor splash intensity
   detail: 'std', // 'fine' | 'std' | 'dense' → backend point density
   mode: 'trace', // 'trace' (faithful strokes + pen lifts) | 'scribble' (one abstract line)
@@ -31,6 +32,18 @@ const DEFAULT_SETTINGS = {
   scratch: true, // pen-scratch (nib-on-paper) sound when 🔊 is on
 };
 const SETTINGS_KEY = 'hh-settings-v1';
+
+// Adaptive draw duration (Feature 1.3): sparse drawings shouldn't drag and
+// dense ones shouldn't feel rushed. 1.6 normalized-units/second matches the
+// comfortable hand pace of the old fixed default (~47u over 30s); clamp keeps
+// pathological inputs (near-blank photos, ultra-dense scribbles) watchable.
+const AUTO_PACE_UPS = 1.6; // path units per second
+const AUTO_MIN_S = 20;
+const AUTO_MAX_S = 42;
+export function autoDrawSeconds(pathLength) {
+  if (!Number.isFinite(pathLength) || pathLength <= 0) return 30;
+  return Math.min(AUTO_MAX_S, Math.max(AUTO_MIN_S, Math.round(pathLength / AUTO_PACE_UPS)));
+}
 
 function loadSettings() {
   try {
@@ -202,6 +215,11 @@ export default function App() {
   // Draw with the currently chosen style. Captured at draw start (runId/phase
   // change); ink colour is also in the deps so a finished piece recolours live.
   const showSplash = phase === 'drawing' || phase === 'done';
+  // Auto mode paces the draw to the path the backend actually returned;
+  // manual mode honours the slider. Evaluated per run (runId in the deps).
+  const drawSeconds = (settings.autoTime ?? true)
+    ? autoDrawSeconds(pathData?.pathLength)
+    : settings.seconds;
   const canvas = useMemo(
     () => (
       <Canvas
@@ -214,7 +232,7 @@ export default function App() {
         {pathData && (
           <Scene
             pathData={pathData}
-            duration={settings.seconds}
+            duration={drawSeconds}
             active={phase === 'drawing'}
             onComplete={handleDrawingDone}
             speedRef={speedRef}

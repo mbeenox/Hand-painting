@@ -97,3 +97,10 @@ Open http://localhost:5173.
 - `e2e_test.py` — headless-Chromium end-to-end test (needs Playwright and
   both servers running): uploads an image through the real UI and
   screenshots the drawing at several timestamps.
+
+## Sample image credits
+
+The bundled "watch a sample" portraits (`frontend/public/samples/`) are both
+public domain: the official NASA portrait of astronaut Mae C. Jemison
+(NASA image s87-45893) and Johannes Vermeer's *Girl with a Pearl Earring*
+(c. 1665, via Wikimedia Commons).

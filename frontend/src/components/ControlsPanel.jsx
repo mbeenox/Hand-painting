@@ -80,9 +80,24 @@ export default function ControlsPanel({ settings, onChange }) {
           </div>
 
           <div style={ui.row}>
-            <span style={ui.label}>Draw time · {settings.seconds}s</span>
-            <input style={ui.range} type="range" min="18" max="45" step="1"
+            <span style={ui.label}>
+              Draw time · {(settings.autoTime ?? true) ? 'Auto' : `${settings.seconds}s`}
+            </span>
+            <div style={ui.seg}>
+              {[[true, 'Auto'], [false, 'Manual']].map(([v, lbl]) => (
+                <button key={lbl} style={ui.segBtn((settings.autoTime ?? true) === v)}
+                  title={v
+                    ? 'Duration adapts to the drawing — sparse finishes sooner, dense gets longer'
+                    : 'Fixed duration from the slider'}
+                  onClick={() => onChange({ autoTime: v })}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+            <input style={{ ...ui.range, opacity: (settings.autoTime ?? true) ? 0.35 : 1 }}
+              type="range" min="18" max="45" step="1"
               value={settings.seconds}
+              disabled={settings.autoTime ?? true}
               onChange={(e) => onChange({ seconds: parseInt(e.target.value, 10) })} />
           </div>
 
