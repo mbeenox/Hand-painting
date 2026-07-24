@@ -146,7 +146,7 @@ export default function ControlsPanel({ settings, onChange }) {
             <span style={ui.label}>Pen scratch · with 🔊 on</span>
             <div style={ui.seg}>
               {[[true, 'On'], [false, 'Off']].map(([v, lbl]) => (
-                <button key={lbl} style={ui.segBtn((settings.scratch ?? true) === v)}
+                <button key={lbl} style={ui.segBtn((settings.scratch ?? false) === v)}
                   title="The nib-on-paper hiss that tracks pen speed"
                   onClick={() => onChange({ scratch: v })}>
                   {lbl}

@@ -17,13 +17,20 @@ with sync_playwright() as p:
     chips = page.query_selector_all("button[aria-label^='Draw sample']")
     assert len(chips) == 2, f"expected 2 sample chips, found {len(chips)}"
 
-    # Enable sound (inside a real click gesture) so the stroke-violin path
-    # (AudioContext, drone, note on/off per stroke) is exercised too.
-    page.click("button[aria-label='Enable sound']")
+    # Sound is ON by default now — the toggle must already read "Mute".
+    assert page.query_selector("button[aria-label='Mute sound']"), \
+        "sound should be ON by default"
 
     # Feature 3.1: draw in a NON-default mood so the mood-parameterized
     # drone/scale/chime paths run (Dusk = A minor pentatonic, darker bow).
+    # These REAL clicks also provide the user activation that lets the
+    # on-by-default AudioContext resume when the draw starts.
     page.click("text=⚙ Style")
+    # Pen scratch must default to Off (v2 settings migration).
+    scratch_off = page.evaluate(
+        """() => JSON.parse(localStorage.getItem('hh-settings-v1') || '{}')"""
+    )
+    assert scratch_off.get("scratch") is not True, "scratch should default off"
     page.click("button:has-text('Dusk')")
     page.click("text=⚙ Style")  # close the panel again
 

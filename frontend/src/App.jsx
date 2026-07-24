@@ -32,7 +32,9 @@ const DEFAULT_SETTINGS = {
   mode: 'trace', // 'trace' (faithful strokes + pen lifts) | 'scribble' (one abstract line)
   instrument: 'duet', // 'duet' | 'violin' | 'piano' → stroke-music voice
   mood: 'dawn',  // 'dawn' | 'dusk' | 'sakura' | 'hymn' → key/drone/character
-  scratch: true, // pen-scratch (nib-on-paper) sound when 🔊 is on
+  scratch: false, // pen-scratch (nib-on-paper) sound when 🔊 is on — OFF by default
+  sound: true,   // master 🔊 toggle — the show performs its music by default
+  _v: 2,         // settings schema version (migration in loadSettings)
 };
 const SETTINGS_KEY = 'hh-settings-v1';
 
@@ -51,7 +53,19 @@ export function autoDrawSeconds(pathLength) {
 function loadSettings() {
   try {
     const raw = typeof localStorage !== 'undefined' && localStorage.getItem(SETTINGS_KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // v2 migration (2026-07-24): pen scratch flipped to OFF-by-default and
+      // sound became on-by-default. Pre-v2 stores carry scratch:true only
+      // because the OLD default was persisted wholesale — flip those two to
+      // the new defaults ONCE; everything else the user chose is kept.
+      if ((saved._v ?? 1) < 2) {
+        saved.scratch = false;
+        saved.sound = true;
+        saved._v = 2;
+      }
+      return { ...DEFAULT_SETTINGS, ...saved };
+    }
   } catch { /* ignore */ }
   return { ...DEFAULT_SETTINGS };
 }
@@ -98,15 +112,19 @@ export default function App() {
   const [error, setError] = useState(null);
   const [runId, setRunId] = useState(0);
   const [stillBlob, setStillBlob] = useState(null);
-  const [soundOn, setSoundOn] = useState(false);
   const [settings, setSettings] = useState(loadSettings);
+  // Sound is ON by default (and remembered): the context itself still only
+  // starts inside a user gesture — the upload / sample / snap click that
+  // begins every draw provides it (sticky activation), so autoplay policy
+  // is satisfied without requiring a trip to the 🔊 button.
+  const [soundOn, setSoundOn] = useState(settings.sound ?? true);
   const [galleryOpen, setGalleryOpen] = useState(false);
 
   const glElRef = useRef(null);
   const splashRef = useRef(null);
   const speedRef = useRef(0);
   const curveRef = useRef(0);
-  const soundOnRef = useRef(false);
+  const soundOnRef = useRef(settings.sound ?? true);
   const settingsRef = useRef(settings);
   useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
@@ -138,6 +156,9 @@ export default function App() {
   const handleImage = useCallback(async (fileOrBlob) => {
     setError(null);
     setStillBlob(null);
+    // This runs inside the upload/sample/camera CLICK — the user gesture that
+    // lets the (on-by-default) AudioContext start before the draw begins.
+    if (soundOnRef.current) setSoundEnabled(true);
     setPhase('processing');
     try {
       const data = await processImage(
@@ -150,7 +171,8 @@ export default function App() {
       setError(e.message);
       setPhase('idle');
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setSoundEnabled]);
 
   const handleDrawingDone = useCallback(() => setPhase('done'), []);
   const reset = useCallback(() => {
@@ -167,6 +189,7 @@ export default function App() {
     soundOnRef.current = next;
     setSoundOn(next);
     setSoundEnabled(next);
+    setSettings((s) => ({ ...s, sound: next })); // remembered across visits
     if (!next) { stopScratch(); stopMusic(); }
   }, [setSoundEnabled, stopScratch, stopMusic]);
 

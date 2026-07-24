@@ -189,6 +189,34 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Sound defaults flip + Phase 4.1 ink-bleed shader (2026-07-24)** —
+  (a) **Sound ON by default, pen scratch OFF by default.** `settings.sound`
+  (persisted; the 🔊 toggle writes it) initializes `soundOn`; the
+  AudioContext still only starts inside a user gesture — `handleImage`
+  calls `setSoundEnabled(true)` inside the upload/sample/camera CLICK that
+  begins every draw, so autoplay policy is satisfied on the natural flow.
+  `settings.scratch` default false; scratch tick now requires `=== true`.
+  ONE-TIME v2 settings migration in `loadSettings` (`_v` field): pre-v2
+  stores get scratch:false + sound:true (their old values were just the
+  persisted old defaults); everything the user chose is kept. E2E asserts
+  the toggle reads "Mute sound" on load and scratch defaults off.
+  (b) **Ink-bleed (4.1)** — `InkTrail` ribbon gains TWO extra attributes:
+  `aCross` (edge parity ±1 — STATIC, prefilled like the index buffer) and
+  `aWidth` (committed half-width — written exactly where positions are
+  written, same append-only discipline). `MeshBasicMaterial` → inline
+  `ShaderMaterial`: edge threshold displaced by WORLD-SPACE 3-octave value
+  fbm (bleed sticks to the paper, not the stroke), faint wick zone gated by
+  finer grain, slight darkening at |cross|≈0.6 (nib-shoulder pooling),
+  transparent + depthWrite:false (single flat mesh; overlaps blend like wet
+  ink). KEY TUNING LESSON: bleed must scale with WETNESS —
+  `wet = aWidth/uMaxHalf`, raggedness ∝ mix(0.35, 1, wet) — the first cut
+  applied full raggedness to hairlines and fragmented them into dashes.
+  Boldness raises both uBleed and uMaxHalf. `USE_BLEED=false` falls back to
+  the flat material (mobile escape hatch). Exports match the screen by
+  construction (same WebGL canvas). Verified: build + full E2E green
+  (video+audio, watermark, GIF, gallery, Dusk mood), zoomed before/after
+  screenshot comparison.
+
 - **Phase 3 — "Musical depth": keys & moods (2026-07-24)** — the music
   gains four selectable MOODS (`useDrawSound.js` MOODS table; Style panel
   "Mood" row; `settings.mood`, default dawn). Each mood is a complete

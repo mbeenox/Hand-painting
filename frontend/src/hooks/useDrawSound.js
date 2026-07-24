@@ -191,9 +191,10 @@ export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
     cancelAnimationFrame(rafRef.current);
     const tick = () => {
       const spd = speedRef.current || 0;
-      // The pen-scratch layer has its own Style-panel toggle (settings.scratch),
-      // read live each frame so flipping it mid-draw responds instantly.
-      const scratchOn = settingsRef?.current?.scratch !== false;
+      // The pen-scratch layer has its own Style-panel toggle (settings.scratch,
+      // OFF by default since the v2 settings migration), read live each frame
+      // so flipping it mid-draw responds instantly.
+      const scratchOn = settingsRef?.current?.scratch === true;
       const target =
         enabledRef.current && scratchOn ? Math.min(0.09, spd * 0.13) : 0;
       try { gain.gain.setTargetAtTime(target, ctx.currentTime, 0.06); } catch { /* noop */ }
