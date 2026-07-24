@@ -21,17 +21,31 @@ const PNG_MAX = 1600;   // long-side cap for the still image
 const VIDEO_MAX = 960;  // long-side cap for the recording (keeps encoding light)
 const VIDEO_FPS = 24;
 
-// Audio-capable codec combos first: the recording carries the stroke-violin /
-// pen-scratch mix when sound is on. A video+opus mimeType with no live audio
-// yet is still fine — the track is attached at record start and simply
-// carries silence until the user enables sound.
+// MP4 (H.264 + AAC) FIRST: it's the only container iPhones play everywhere
+// (Photos, iMessage, AirDrop) — .webm files shared to an iPhone often won't
+// open at all. Chrome (126+) and Safari both record mp4; Firefox falls back
+// to webm. Audio-capable combos before video-only ones: the recording
+// carries the stroke-music mix when sound is on (a mimeType with an audio
+// codec but a still-silent track is fine — the track is attached at record
+// start and carries silence until the user enables sound).
+// Order rationale (verified against isTypeSupported behavior):
+// 1. EXPLICIT H.264+AAC mp4 — branded Chrome/Edge (126+) accept these and
+//    produce the one container iPhones play everywhere.
+// 2. webm+opus — Firefox and codec-less Chromium builds land here; those
+//    builds accept a BARE 'video/mp4' but silently mux Opus into it (no AAC
+//    encoder), producing an mp4 iPhones still can't play — which is why the
+//    bare form is LAST, not first (caught by the E2E audio-box assertion).
+// 3. bare 'video/mp4' — Safari's path; its only encoder is H.264+AAC, so
+//    the result is iPhone-safe anyway.
 const VIDEO_MIMES = [
+  'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+  'video/mp4;codecs=avc1,mp4a.40.2',
   'video/webm;codecs=vp9,opus',
   'video/webm;codecs=vp8,opus',
   'video/webm;codecs=vp9',
   'video/webm;codecs=vp8',
   'video/webm',
-  'video/mp4', // Safari records mp4/H.264+AAC rather than webm
+  'video/mp4',
 ];
 function pickMime() {
   if (typeof window === 'undefined' || !('MediaRecorder' in window)) return '';
@@ -136,7 +150,10 @@ export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, pa
     };
     recorder.onstop = () => {
       cancelAnimationFrame(rafRef.current);
-      const type = mime || 'video/webm';
+      // Trust the recorder's ACTUAL mimeType (browsers may normalize the
+      // requested one) so the blob type and file extension always match
+      // the real container.
+      const type = recorder.mimeType || mime || 'video/webm';
       const blob = new Blob(chunksRef.current, { type });
       const ext = type.includes('mp4') ? 'mp4' : 'webm';
       setVideo({ url: URL.createObjectURL(blob), ext });

@@ -27,26 +27,37 @@ with sync_playwright() as p:
     page.screenshot(path="e2e_4_done.png")
 
     # Wait out the rest of the 30s draw + the 2.6s post-done capture stop,
-    # then verify the recorded video BLOB really contains an audio track
-    # (webm muxes Opus → the init segment contains "OpusHead").
+    # then verify the recorded video BLOB really contains an audio track:
+    # mp4 (preferred — iPhone-safe H.264+AAC) muxes an "mp4a" sample entry;
+    # webm (fallback) muxes Opus → an "OpusHead" init segment.
     video_link = page.wait_for_selector("a[download^='hypnotic-hand.']",
                                         timeout=30000)
-    has_audio = page.evaluate(
+    result = page.evaluate(
         """async (a) => {
              const buf = await (await fetch(a.href)).arrayBuffer();
              const bytes = new Uint8Array(buf);
-             const needle = [0x4F,0x70,0x75,0x73,0x48,0x65,0x61,0x64]; // "OpusHead"
-             outer: for (let i = 0; i <= bytes.length - needle.length; i++) {
-               for (let j = 0; j < needle.length; j++) {
-                 if (bytes[i + j] !== needle[j]) continue outer;
+             const find = (s) => {
+               const n = Array.from(s, (c) => c.charCodeAt(0));
+               outer: for (let i = 0; i <= bytes.length - n.length; i++) {
+                 for (let j = 0; j < n.length; j++) {
+                   if (bytes[i + j] !== n[j]) continue outer;
+                 }
+                 return true;
                }
-               return true;
-             }
-             return false;
+               return false;
+             };
+             const ext = a.download.split('.').pop();
+             // mp4: AAC sample entry "mp4a" (or "Opus" if a codec-less build
+             // ever lands there); webm: "OpusHead" init segment.
+             const audio = ext === 'mp4'
+               ? (find('mp4a') || find('Opus'))
+               : find('OpusHead');
+             return { ext, audio, bytes: bytes.length };
            }""",
         video_link,
     )
-    print("video has audio track (OpusHead found):", has_audio)
+    print("saved video:", result)
+    assert result["audio"], "recorded video is missing its audio track!"
     browser.close()
 
 print("console/page errors:", errors if errors else "none")
