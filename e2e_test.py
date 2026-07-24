@@ -78,6 +78,10 @@ with sync_playwright() as p:
     )
     assert scratch_off.get("scratch") is not True, "scratch should default off"
     page.click("button:has-text('Dusk')")
+    # Completeness dial present, default 100%.
+    comp = page.query_selector("input[aria-label='Completeness']")
+    assert comp, "Completeness slider missing"
+    assert float(comp.get_attribute("value") or 0) == 1.0, "default must be 100%"
     page.click("text=⚙ Style")  # close the panel again
 
     page.set_input_files("input[type=file]", "backend/test_input.png")
@@ -185,6 +189,20 @@ with sync_playwright() as p:
     assert st.get("paper") == "noir", f"paper not switched: {st.get('paper')}"
     assert st.get("inkColor") == "#f2ede3", \
         f"ink should auto-switch to chalk on noir, got {st.get('inkColor')}"
+    # Set Completeness to 50% (React-controlled range → native setter + event);
+    # the sample draw below runs as a half-finished chalk sketch.
+    page.evaluate("""() => {
+      const el = document.querySelector("input[aria-label='Completeness']");
+      const set = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value').set;
+      set.call(el, '0.5');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }""")
+    st = page.evaluate(
+        "() => JSON.parse(localStorage.getItem('hh-settings-v1') || '{}')"
+    )
+    assert st.get("completeness") == 0.5, \
+        f"completeness not persisted: {st.get('completeness')}"
     page.click("text=⚙ Style")
 
     # Feature 2.1: the finished drawing landed on the gallery wall.

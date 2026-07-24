@@ -189,6 +189,31 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Completeness dial + artist-pass stroke ordering (2026-07-24)** — the
+  app never "decided" when to stop: it always drew 100% of a path fixed at
+  processing time (Canny → min_chain/max_strokes culling → point budget).
+  Now the user decides.
+  (a) **`order_chains_in_passes`** (both backends): chains sorted longest-
+  first into cumulative-length tiers (~50% / ~85% / rest), greedy nearest-
+  endpoint travel WITH random start kept WITHIN each pass. Result: strokes
+  arrive contours → structure → details, so ANY PREFIX is a coherent
+  sketch (measured on pearl: first 25% of strokes carry 59% of the ink);
+  per-run uniqueness preserved. This changes the choreography at 100% too —
+  the hand now blocks in big shapes first, like an artist.
+  (b) **`lib/truncatePath.js`** — client-side cut at STROKE BOUNDARIES by
+  path-length fraction (an artist finishes the stroke they started; always
+  keeps at least stroke 1). Applied once per run in `App.handleImage`
+  (like detail/mode); recomputes pathLength so ADAPTIVE DURATION and the
+  music shorten with it. `settings.completeness` (0.3–1.0, default 1),
+  "Completeness · N%" slider in the Style panel; gallery meta records it.
+  Rendered check: 40% = gestural sketch · 70% = confident study · 100% =
+  full texture (40% arguably the most elegant — short-stroke speckle noise
+  only appears near 100%).
+  E2E: slider present w/ default 100%; set to 50% via native-setter +
+  input event (React-controlled range) before the noir sample draw.
+  Unit: node test of truncatePath (identity at 1.0, boundary cuts,
+  min-one-stroke); python check of pass front-loading.
+
 - **Camera upgrades: back-camera flip + face focus (2026-07-24)** —
   (a) **Flip.** `UploadPanel` camera gains facing state ('user'/'environment')
   and a Flip button shown ONLY when `enumerateDevices` reports >1 videoinput

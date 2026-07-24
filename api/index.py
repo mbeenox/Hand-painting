@@ -468,6 +468,40 @@ def order_chains(chains: List[np.ndarray],
     return ordered
 
 
+def order_chains_in_passes(chains: List[np.ndarray],
+                           rng: np.random.Generator) -> List[np.ndarray]:
+    """Artist-pass stroke ordering (Completeness dial, 2026-07-24).
+
+    Real sketch artists work in passes: big defining contours first, then
+    structure, then fine detail last. Ordering strokes that way makes ANY
+    PREFIX of the drawing a coherent sketch — which is what lets the
+    client-side Completeness dial simply stop the pen partway and still
+    look like an artist chose to stop, not like the photo got amputated.
+
+    Tiers by CUMULATIVE length share (longest chains first): pass 1 = the
+    chains that make up the first ~50% of total ink, pass 2 = up to ~85%,
+    pass 3 = the remaining short detail flicks. Within each pass the
+    existing greedy nearest-endpoint travel (RANDOM start) is kept, so
+    per-run uniqueness and the pleasing local hops both survive.
+    """
+    if len(chains) <= 2:
+        return order_chains(chains, rng)
+    lens = [_chain_len(c) for c in chains]
+    order = sorted(range(len(chains)), key=lambda i: -lens[i])
+    total = float(sum(lens)) or 1.0
+    tiers = ([], [], [])
+    acc = 0.0
+    for i in order:
+        t = 0 if acc < total * 0.5 else (1 if acc < total * 0.85 else 2)
+        tiers[t].append(chains[i])
+        acc += lens[i]
+    out: List[np.ndarray] = []
+    for tier in tiers:
+        if tier:
+            out.extend(order_chains(tier, rng))
+    return out
+
+
 def smooth_chains(chains: List[np.ndarray], total_points: int,
                   rng: np.random.Generator):
     """
@@ -547,7 +581,7 @@ async def _process(file: UploadFile, detail: str = "std", mode: str = "trace",
         if len(chains) > max_strokes:                          # keep the longest
             chains.sort(key=_chain_len, reverse=True)
             chains = chains[:max_strokes]
-        chains = order_chains(chains, rng)                     # C′ stroke order
+        chains = order_chains_in_passes(chains, rng)                     # C′ stroke order
         path, breaks = smooth_chains(chains, output_points, rng)  # D′+E′
         num_sampled = int(sum(len(c) for c in chains))
     else:  # "scribble" — the original abstract one-line TSP look

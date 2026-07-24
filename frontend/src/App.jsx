@@ -22,6 +22,7 @@ import { useDrawSound } from './hooks/useDrawSound.js';
 import { useGallery } from './hooks/useGallery.js';
 import { processImage } from './api.js';
 import { getPaper, DEFAULT_PAPER } from './lib/papers.js';
+import { truncatePath } from './lib/truncatePath.js';
 
 const DEFAULT_SETTINGS = {
   paper: DEFAULT_PAPER, // paper stock: 'ivory' | 'noir' | 'kraft' | 'slate'
@@ -34,6 +35,7 @@ const DEFAULT_SETTINGS = {
   mode: 'trace', // 'trace' (faithful strokes + pen lifts) | 'scribble' (one abstract line)
   instrument: 'duet', // 'duet' | 'violin' | 'piano' → stroke-music voice
   mood: 'dawn',  // 'dawn' | 'dusk' | 'sakura' | 'hymn' → key/drone/character
+  completeness: 1.0, // how far the artist goes before stopping (0.3–1.0)
   scratch: false, // pen-scratch (nib-on-paper) sound when 🔊 is on — OFF by default
   sound: true,   // master 🔊 toggle — the show performs its music by default
   _v: 2,         // settings schema version (migration in loadSettings)
@@ -171,7 +173,10 @@ export default function App() {
         fileOrBlob, settingsRef.current.detail, settingsRef.current.mode,
         opts.focus ?? 'none'
       );
-      setPathData(data);
+      // Completeness dial: strokes arrive in artist passes (contours →
+      // structure → details), so cutting the tail leaves a coherent,
+      // intentionally-unfinished sketch. Applied per run, like detail.
+      setPathData(truncatePath(data, settingsRef.current.completeness ?? 1));
       setRunId((n) => n + 1);
       setPhase('drawing');
     } catch (e) {
@@ -244,6 +249,7 @@ export default function App() {
         detail: s.detail,
         instrument: s.instrument ?? 'duet',
         paper: s.paper ?? DEFAULT_PAPER,
+        completeness: pathData?.completeness ?? 1,
         seconds,
         strokes: pathData?.breaks?.length || undefined,
       });

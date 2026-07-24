@@ -171,6 +171,20 @@ export default function ControlsPanel({ settings, onChange }) {
           </div>
 
           <div style={ui.row}>
+            <span style={ui.label}>
+              Completeness · {Math.round((settings.completeness ?? 1) * 100)}%
+            </span>
+            <input
+              style={ui.range} type="range" min="0.3" max="1" step="0.05"
+              value={settings.completeness ?? 1}
+              title="How far the artist goes before stopping — strokes are drawn
+big contours first, so an early stop still reads as a deliberate sketch"
+              aria-label="Completeness"
+              onChange={(e) => onChange({ completeness: parseFloat(e.target.value) })}
+            />
+          </div>
+
+          <div style={ui.row}>
             <span style={ui.label}>Detail</span>
             <div style={ui.seg}>
               {DETAILS.map(([v, lbl]) => (
