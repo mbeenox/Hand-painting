@@ -51,7 +51,7 @@ const DUET_SPLIT_S = 0.5; // duet mode: strokes shorter than this → piano,
                           // percussive hits suit detail flicks)
 const MAX_PIANOS = 24;    // safety cap on simultaneously ringing piano notes
 
-export function useDrawSound(enabledRef, speedRef, curveRef) {
+export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
   const ctxRef = useRef(null);
   const masterRef = useRef(null);    // one bus everything plays through
   const mediaDestRef = useRef(null); // tap of that bus for video recording
@@ -132,7 +132,11 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
     cancelAnimationFrame(rafRef.current);
     const tick = () => {
       const spd = speedRef.current || 0;
-      const target = enabledRef.current ? Math.min(0.09, spd * 0.13) : 0;
+      // The pen-scratch layer has its own Style-panel toggle (settings.scratch),
+      // read live each frame so flipping it mid-draw responds instantly.
+      const scratchOn = settingsRef?.current?.scratch !== false;
+      const target =
+        enabledRef.current && scratchOn ? Math.min(0.09, spd * 0.13) : 0;
       try { gain.gain.setTargetAtTime(target, ctx.currentTime, 0.06); } catch { /* noop */ }
 
       // Per-frame violin expression on the sounding note: bow pressure
@@ -153,7 +157,7 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
       rafRef.current = requestAnimationFrame(tick);
     };
     tick();
-  }, [ensureCtx, buildScratch, enabledRef, speedRef, curveRef]);
+  }, [ensureCtx, buildScratch, enabledRef, speedRef, curveRef, settingsRef]);
 
   const stopScratch = useCallback(() => {
     cancelAnimationFrame(rafRef.current);

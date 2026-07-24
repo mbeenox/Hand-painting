@@ -121,6 +121,19 @@ export default function ControlsPanel({ settings, onChange }) {
           </div>
 
           <div style={ui.row}>
+            <span style={ui.label}>Pen scratch · with 🔊 on</span>
+            <div style={ui.seg}>
+              {[[true, 'On'], [false, 'Off']].map(([v, lbl]) => (
+                <button key={lbl} style={ui.segBtn((settings.scratch ?? true) === v)}
+                  title="The nib-on-paper hiss that tracks pen speed"
+                  onClick={() => onChange({ scratch: v })}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={ui.row}>
             <span style={ui.label}>Instrument · with 🔊 on</span>
             <div style={ui.seg}>
               {INSTRUMENTS.map(([v, lbl]) => (

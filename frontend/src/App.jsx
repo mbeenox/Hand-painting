@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
   detail: 'std', // 'fine' | 'std' | 'dense' → backend point density
   mode: 'trace', // 'trace' (faithful strokes + pen lifts) | 'scribble' (one abstract line)
   instrument: 'duet', // 'duet' | 'violin' | 'piano' → stroke-music voice
+  scratch: true, // pen-scratch (nib-on-paper) sound when 🔊 is on
 };
 const SETTINGS_KEY = 'hh-settings-v1';
 
@@ -80,7 +81,7 @@ export default function App() {
   const {
     startScratch, stopScratch, startMusic, stopMusic,
     noteOn, noteOff, chime, setSoundEnabled, getAudioStream,
-  } = useDrawSound(soundOnRef, speedRef, curveRef);
+  } = useDrawSound(soundOnRef, speedRef, curveRef, settingsRef);
   // Sound hook first: the capture takes its audio stream so the saved video
   // carries the stroke-violin performance.
   const { start, stop, snapshotPNG, video, recSupported } =
