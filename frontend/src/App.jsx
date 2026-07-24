@@ -35,7 +35,7 @@ const DEFAULT_SETTINGS = {
   mode: 'trace', // 'trace' (faithful strokes + pen lifts) | 'scribble' (one abstract line)
   instrument: 'duet', // 'duet' | 'violin' | 'piano' → stroke-music voice
   mood: 'dawn',  // 'dawn' | 'dusk' | 'sakura' | 'hymn' → key/drone/character
-  completeness: 1.0, // how far the artist goes before stopping (0.3–1.0)
+  completeness: 1.0, // how far the artist goes (0.3–2.0; 1.0 = classic full)
   scratch: false, // pen-scratch (nib-on-paper) sound when 🔊 is on — OFF by default
   sound: true,   // master 🔊 toggle — the show performs its music by default
   _v: 2,         // settings schema version (migration in loadSettings)
@@ -48,7 +48,8 @@ const SETTINGS_KEY = 'hh-settings-v1';
 // pathological inputs (near-blank photos, ultra-dense scribbles) watchable.
 const AUTO_PACE_UPS = 1.6; // path units per second
 const AUTO_MIN_S = 20;
-const AUTO_MAX_S = 42;
+const AUTO_MAX_S = 58; // raised from 42 for the 200%-completeness ceiling —
+                       // maxed-out drawings need room to breathe (2026-07-24)
 export function autoDrawSeconds(pathLength) {
   if (!Number.isFinite(pathLength) || pathLength <= 0) return 30;
   return Math.min(AUTO_MAX_S, Math.max(AUTO_MIN_S, Math.round(pathLength / AUTO_PACE_UPS)));

@@ -189,6 +189,31 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Completeness ceiling raised to 200% (2026-07-24)** — the dial now runs
+  30–200%; 100% still means the classic full drawing, 200% is "everything
+  the pen can find". Mechanics:
+  (a) **`span=2` tier** (both backends; trace mode always requests it):
+  Canny sensitivity P92 → **P85** (the chain-length filter alone finds
+  almost nothing new on clean photos — the EDGE MAP is the detail
+  ceiling), min_chain ×0.6, output_points ×2, max_strokes ×2.
+  (b) **`baseFrac` anchor**: the base (P92) edge map is ALSO computed; a
+  chain is base-eligible iff ≥55% of samples ALONG it (every ~3px — polyDP
+  vertices alone are too sparse) land on the 1px-dilated base map AND it
+  passes the base length filter, capped at the base stroke count.
+  baseFrac = eligible ink / total ink, returned in the response.
+  (c) **Client mapping** (`truncatePath`): label L ≤ 1 → cut at L·baseFrac;
+  L > 1 → baseFrac + (L−1)(1−baseFrac), i.e. 100–200% walks linearly into
+  the extra detail and 200% always uses the full dial travel even when a
+  photo's real ceiling is lower (sparse astronaut: ×1.19 ink; busy pearl:
+  ×1.52, 440 strokes). Scribble/span-1 has baseFrac=1 → labels >100%
+  are a no-op, stored settings keep their meaning (no migration).
+  (d) AUTO_MAX_S 42 → **58** so maxed-out drawings don't rush.
+  Calibration verified: 100%-label ink within 4–14% of the span-1 drawing
+  on both samples; monotone node tests; full E2E green (GIF grew to
+  ~7 MB with the longer default draw — still under the 15 MB spec).
+  Watch-out: the 4-stroke toy test showed boundary snapping can make
+  adjacent labels identical — real drawings (200+ strokes) are fine.
+
 - **Completeness dial + artist-pass stroke ordering (2026-07-24)** — the
   app never "decided" when to stop: it always drew 100% of a path fixed at
   processing time (Canny → min_chain/max_strokes culling → point budget).

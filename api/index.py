@@ -156,7 +156,7 @@ def face_focus(img_bgr: np.ndarray):
     return out.astype(np.uint8), int(len(faces)), mask
 
 
-def detect_edges(img_bgr: np.ndarray) -> np.ndarray:
+def detect_edges(img_bgr: np.ndarray, hi_pct: float = 92.0) -> np.ndarray:
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     # CLAHE FIRST so faint structure is amplified before smoothing can kill
     # it; gentler bilateral (sigmaColor 50→35) keeps soft edges alive.
@@ -171,7 +171,7 @@ def detect_edges(img_bgr: np.ndarray) -> np.ndarray:
     gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
     mag = np.hypot(gx, gy)
     nz = mag[mag > 1.0]
-    hi = float(np.percentile(nz, 92.0)) if len(nz) else 100.0
+    hi = float(np.percentile(nz, hi_pct)) if len(nz) else 100.0
     edges = cv2.Canny(gray, 0.45 * hi, hi, L2gradient=True)
     n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(edges, connectivity=8)
     min_blob = max(10, int(0.00005 * edges.size))
@@ -531,7 +531,7 @@ def smooth_chains(chains: List[np.ndarray], total_points: int,
 # Endpoint — registered at both the Vercel path and the bare path
 # ==========================================================================
 async def _process(file: UploadFile, detail: str = "std", mode: str = "trace",
-                   focus: str = "none"):
+                   focus: str = "none", span: int = 1):
     t_start = time.perf_counter()
     raw = await file.read()
     if not raw:
@@ -563,14 +563,31 @@ async def _process(file: UploadFile, detail: str = "std", mode: str = "trace",
     if focus == "face":
         img, n_faces, face_mask = face_focus(img)
 
-    edges = detect_edges(img)                                  # A
+    # span=2 (the 200%-completeness tier) also SEES fainter edges (P88 vs
+    # P92 Canny) — on clean photos the chain filter alone finds almost
+    # nothing new; the edge map itself is the detail ceiling. The BASE edge
+    # map is still computed to anchor "100%" (see base-eligibility below).
+    edges = detect_edges(img, 85.0 if span == 2 else 92.0)     # A
+    base_edges = detect_edges(img) if span == 2 else None
     if face_mask is not None:
         edges[face_mask < 0.22] = 0  # kill ghost edges from blur remnants
+        if base_edges is not None:
+            base_edges[face_mask < 0.22] = 0
     breaks = [0]
 
+    span = 2 if int(span) == 2 else 1
+    base_frac = 1.0
     if mode == "trace":
         eps, min_chain, output_points, max_strokes = \
             TRACE_LEVELS.get(detail, TRACE_LEVELS["std"])
+        base_min_chain, base_strokes = min_chain, max_strokes
+        if span == 2:
+            # 200%-completeness tier: admit the chains the base budget culls
+            # (shorter filaments) and double the stroke/point budgets. The
+            # base look stays reachable — see base_frac below.
+            min_chain = max(4, int(round(min_chain * 0.6)))
+            output_points *= 2
+            max_strokes *= 2
         chains = trace_chains(edges, eps, min_chain)           # B′ follow edges
         if not chains:
             raise HTTPException(
@@ -581,6 +598,37 @@ async def _process(file: UploadFile, detail: str = "std", mode: str = "trace",
         if len(chains) > max_strokes:                          # keep the longest
             chains.sort(key=_chain_len, reverse=True)
             chains = chains[:max_strokes]
+        if span == 2 and chains:
+            # baseFrac anchors the dial's "100%" to the CLASSIC drawing: a
+            # chain is base-eligible iff it (a) actually lies on the BASE
+            # (P92) edge map — vertices checked against a 1px-dilated map,
+            # ≥50% hits — and (b) passes the base length filter (raw
+            # boundary count ≥ min_chain ≈ arc ≥ min_chain/2); then the base
+            # stroke cap keeps the longest. baseFrac = their share of ink.
+            dil = cv2.dilate(base_edges, np.ones((3, 3), np.uint8))
+            h_e, w_e = dil.shape
+            elig_lens = []
+            all_lens = []
+            for c in chains:
+                l = _chain_len(c)
+                all_lens.append(l)
+                # Sample ALONG the polyline (~3px spacing), not just the
+                # sparse polyDP vertices — long smooth chains have few
+                # vertices and a vertex-only test is noisy.
+                n_s = max(4, int(l / 3))
+                seg = np.linalg.norm(np.diff(c, axis=0), axis=1)
+                cs = np.concatenate([[0.0], np.cumsum(seg)])
+                t = np.linspace(0, cs[-1], n_s)
+                xi = np.interp(t, cs, c[:, 0])
+                yi = np.interp(t, cs, c[:, 1])
+                xs = np.clip(xi.astype(int), 0, w_e - 1)
+                ys = np.clip(yi.astype(int), 0, h_e - 1)
+                on_base = float(np.mean(dil[ys, xs] > 0))
+                if on_base >= 0.55 and l >= base_min_chain * 0.5:
+                    elig_lens.append(l)
+            elig_lens = sorted(elig_lens, reverse=True)[:base_strokes]
+            total_l = float(sum(all_lens))
+            base_frac = float(sum(elig_lens)) / total_l if total_l > 0 else 1.0
         chains = order_chains_in_passes(chains, rng)                     # C′ stroke order
         path, breaks = smooth_chains(chains, output_points, rng)  # D′+E′
         num_sampled = int(sum(len(c) for c in chains))
@@ -615,21 +663,24 @@ async def _process(file: UploadFile, detail: str = "std", mode: str = "trace",
         "pathLength": round(length, 4),
         "processingSeconds": round(elapsed, 3),
         "facesFocused": n_faces,
+        # Anchor for the Completeness dial: fraction of this path's ink that
+        # corresponds to the base (span-1) budget. 1.0 for scribble/span-1.
+        "baseFrac": round(base_frac, 4),
     }
 
 
 @app.post("/api/process-image")   # path seen when deployed on Vercel
 async def process_image_vercel(file: UploadFile = File(...),
                                detail: str = "std", mode: str = "trace",
-                               focus: str = "none"):
-    return await _process(file, detail, mode, focus)
+                               focus: str = "none", span: int = 1):
+    return await _process(file, detail, mode, focus, span)
 
 
 @app.post("/process-image")       # path seen under bare local uvicorn
 async def process_image_local(file: UploadFile = File(...),
                               detail: str = "std", mode: str = "trace",
-                              focus: str = "none"):
-    return await _process(file, detail, mode, focus)
+                              focus: str = "none", span: int = 1):
+    return await _process(file, detail, mode, focus, span)
 
 
 BUILD_MARKER = "2026-07-23-r4-edges"  # bumped per deploy to verify rollouts

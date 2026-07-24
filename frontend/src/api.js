@@ -50,6 +50,10 @@ export async function processImage(fileOrBlob, detail = 'std', mode = 'trace', f
   // focus=face (camera snaps): the backend blurs the background behind
   // detected faces so the stroke budget concentrates on the subject.
   if (focus && focus !== 'none') params.set('focus', focus);
+  // Trace mode always fetches the 2x-budget path (span=2): the Completeness
+  // dial then cuts it client-side anywhere from 30% to 200% instantly.
+  // The response's baseFrac anchors "100%" to the base-budget drawing.
+  if ((mode ?? 'trace') === 'trace') params.set('span', '2');
   const q = params.toString();
   const qs = q ? `?${q}` : '';
   const res = await fetch(`${API_BASE}/process-image${qs}`, {

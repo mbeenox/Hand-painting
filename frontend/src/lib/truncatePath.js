@@ -11,11 +11,15 @@
  * Applied ONCE per run (in App.handleImage, like detail/mode), so a
  * mid-draw slider change waits for the next drawing.
  */
-export function truncatePath(data, fraction) {
-  const frac = Number(fraction);
-  if (!data || !Array.isArray(data.points) || !(frac > 0) || frac >= 0.999) {
-    return data;
-  }
+export function truncatePath(data, label) {
+  const L = Number(label);
+  if (!data || !Array.isArray(data.points) || !(L > 0)) return data;
+  // Label → ink fraction, anchored on baseFrac (the backend-reported share
+  // of ink belonging to the base budget): 100% = exactly the classic full
+  // drawing; 100–200% walks linearly into the extra span-2 detail.
+  const bf = Math.min(1, Math.max(0.05, Number(data.baseFrac) || 1));
+  const frac = L <= 1 ? L * bf : bf + (L - 1) * (1 - bf);
+  if (frac >= 0.999) return data;
   const pts = data.points;
   const breaks = Array.isArray(data.breaks) && data.breaks.length
     ? data.breaks
@@ -31,7 +35,7 @@ export function truncatePath(data, fraction) {
   }
   const total = cum[pts.length - 1];
   if (!(total > 0)) return data;
-  const target = total * Math.min(1, Math.max(0.05, frac));
+  const target = total * Math.min(1, Math.max(0.02, frac));
 
   // Keep every stroke that STARTS at or before the target; cut where the
   // first stroke beyond it begins.
@@ -51,6 +55,6 @@ export function truncatePath(data, fraction) {
     breaks: newBreaks,
     numStrokes: newBreaks.length,
     pathLength: Math.round(cum[cut - 1] * 10000) / 10000,
-    completeness: frac,
+    completeness: L,
   };
 }
