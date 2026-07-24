@@ -27,6 +27,7 @@ const DEFAULT_SETTINGS = {
   splash: 1.0,   // watercolor splash intensity
   detail: 'std', // 'fine' | 'std' | 'dense' → backend point density
   mode: 'trace', // 'trace' (faithful strokes + pen lifts) | 'scribble' (one abstract line)
+  instrument: 'duet', // 'duet' | 'violin' | 'piano' → stroke-music voice
 };
 const SETTINGS_KEY = 'hh-settings-v1';
 
@@ -86,6 +87,14 @@ export default function App() {
     useDrawCapture(glElRef, splashRef, getAudioStream);
 
   const updateSettings = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), []);
+
+  // Stroke events from the Scene → the sound engine, with the user's chosen
+  // instrument attached (read via ref so the callback identity stays stable).
+  const handleNoteOn = useCallback(
+    (pitch01, curve01, estDur) =>
+      noteOn(pitch01, curve01, estDur, settingsRef.current.instrument ?? 'duet'),
+    [noteOn]
+  );
 
   const handleImage = useCallback(async (fileOrBlob) => {
     setError(null);
@@ -209,7 +218,7 @@ export default function App() {
             onComplete={handleDrawingDone}
             speedRef={speedRef}
             curveRef={curveRef}
-            onNoteOn={noteOn}
+            onNoteOn={handleNoteOn}
             onNoteOff={noteOff}
             inkColor={settings.inkColor}
             weight={settings.weight}

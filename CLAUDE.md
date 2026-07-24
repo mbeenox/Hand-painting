@@ -186,6 +186,18 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Feature #7 — piano voice + duet (2026-07-23)** — second instrument:
+  synthesized piano (partial stack 1/2.003/3.007 with hammer attack and
+  pitch-scaled exponential decay, self-terminating — no note-off needed).
+  Default **Duet** mode lets each stroke pick its instrument by estimated
+  draw time (`usePathAnimation` exposes per-vertex `strokeEnd`; Scene passes
+  `estDur` at note-on): strokes ≥ `DUET_SPLIT_S` (0.5s) are bowed, shorter
+  flicks are struck. Style panel gains an **Instrument** row
+  (Duet/Violin/Piano) stored in settings (`instrument`), threaded via a
+  stable `handleNoteOn` wrapper reading `settingsRef`. `stopMusic` also
+  silences ringing pianos (MAX_PIANOS 24 cap). E2E re-verified (duet
+  default): zero console errors, OpusHead present in recorded video.
+
 - **Feature #6b — audio in the saved video (2026-07-23)** — `useDrawSound`
   now routes every source through a master GainNode and exposes
   `getAudioStream()` (a `MediaStreamDestination` tap of that bus);

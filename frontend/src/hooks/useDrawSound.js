@@ -25,6 +25,12 @@
  *     Since stroke ORDER is randomized per run, every drawing of the same photo
  *     performs a different melody.
  *
+ *   • PIANO (Feature #7): a second voice — decaying partial-stack notes with a
+ *     hammer attack, self-terminating (no note-off). In the default DUET mode
+ *     each stroke picks its own instrument by estimated draw time: long lines
+ *     are bowed by the violin, short detail flicks are struck on the piano.
+ *     The Style panel's Instrument setting can force violin-only / piano-only.
+ *
  *   • completion chime = a soft C-major triad (consonant with the drone).
  *
  * Off by default. The AudioContext is created/resumed inside the toggle's user
@@ -36,10 +42,14 @@ import { useCallback, useEffect, useRef } from 'react';
 // C-major pentatonic, two octaves up from C4 — semitone offsets from BASE_FREQ.
 const SCALE = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24];
 const BASE_FREQ = 261.63; // C4
-const MAX_VOICES = 5;     // safety cap on overlapping releases
+const MAX_VOICES = 5;     // safety cap on overlapping violin releases
 const RETRIGGER_S = 0.09; // min seconds between note-ons (folds micro-strokes)
 const MIN_NOTE_S = 0.13;  // shortest audible note even for instant lifts
 const SPEED_NORM = 25;    // world-units/sec that counts as "fast bowing"
+const DUET_SPLIT_S = 0.5; // duet mode: strokes shorter than this → piano,
+                          // longer → bowed violin (sustains suit long lines,
+                          // percussive hits suit detail flicks)
+const MAX_PIANOS = 24;    // safety cap on simultaneously ringing piano notes
 
 export function useDrawSound(enabledRef, speedRef, curveRef) {
   const ctxRef = useRef(null);
@@ -159,9 +169,55 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
   // ------------------------------------------------------------------
   const ensureMusic = useCallback(() => {
     if (!musicRef.current) {
-      musicRef.current = { drone: null, voices: [], current: null, lastOn: -1 };
+      musicRef.current = {
+        drone: null, voices: [], pianos: [], current: null, lastOn: -1,
+      };
     }
     return musicRef.current;
+  }, []);
+
+  /**
+   * Piano note: a small stack of decaying partials (fundamental + slightly
+   * stretched 2nd/3rd, like real string inharmonicity) with a near-instant
+   * hammer attack. Self-terminating — oscillators stop themselves after the
+   * decay, so pianos need no note-off; lower notes ring longer, like a real
+   * instrument.
+   */
+  const pianoNote = useCallback((ctx, m, freq) => {
+    const now = ctx.currentTime;
+    const decay = Math.min(3.0, Math.max(1.1, 2.6 * Math.pow(220 / freq, 0.4)));
+    const peak = Math.min(0.16, 0.09 + 18 / freq); // lower notes a touch fuller
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(peak, now + 0.004); // hammer strike
+    gain.gain.exponentialRampToValueAtTime(0.0004, now + decay);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(Math.min(7500, freq * 7), now);
+    lp.frequency.exponentialRampToValueAtTime(Math.max(500, freq * 1.6), now + decay);
+    lp.connect(gain).connect(masterRef.current);
+    const partials = [[1.0, 1.0, 'triangle'], [2.003, 0.32, 'sine'], [3.007, 0.10, 'sine']];
+    const oscs = partials.map(([mult, amp, type]) => {
+      const o = ctx.createOscillator();
+      o.type = type;
+      o.frequency.value = freq * mult;
+      const g = ctx.createGain();
+      g.gain.value = amp;
+      o.connect(g).connect(lp);
+      o.start(now);
+      o.stop(now + decay + 0.25);
+      return o;
+    });
+    const v = { gain, oscs };
+    m.pianos.push(v);
+    oscs[0].onended = () => {
+      const i = m.pianos.indexOf(v);
+      if (i >= 0) m.pianos.splice(i, 1);
+    };
+    if (m.pianos.length > MAX_PIANOS) {
+      const old = m.pianos.shift();
+      try { old.gain.gain.setTargetAtTime(0.0001, now, 0.05); } catch { /* noop */ }
+    }
   }, []);
 
   const releaseVoice = useCallback((ctx, v, when, tail) => {
@@ -215,6 +271,10 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
     for (const v of m.voices) releaseVoice(ctx, v, now, 0.4);
     m.voices = [];
     m.current = null;
+    for (const pv of m.pianos) {
+      try { pv.gain.gain.setTargetAtTime(0.0001, now, 0.15); } catch { /* noop */ }
+    }
+    m.pianos = [];
     if (m.drone) {
       const { oscs, gain } = m.drone;
       try {
@@ -225,9 +285,12 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
     }
   }, [releaseVoice]);
 
-  /** Pen landed: bow a new note. pitch01 = stroke height on the canvas (0..1
-   *  bottom→top), curve01 = line curvature there (initial vibrato). */
-  const noteOn = useCallback((pitch01, curve01 = 0) => {
+  /** Pen landed: play a new note. pitch01 = stroke height on the canvas
+   *  (0..1 bottom→top), curve01 = line curvature there (initial vibrato),
+   *  estDur = estimated seconds this stroke will take to draw, instrument =
+   *  'duet' | 'violin' | 'piano'. In duet mode the stroke chooses its own
+   *  instrument: long lines are bowed, short flicks are struck. */
+  const noteOn = useCallback((pitch01, curve01 = 0, estDur = Infinity, instrument = 'duet') => {
     if (!enabledRef.current) return;
     const ctx = ensureCtx();
     if (!ctx) return;
@@ -237,11 +300,19 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
     if (now - m.lastOn < RETRIGGER_S) return; // fold micro-strokes into the ringing note
     m.lastOn = now;
 
-    if (m.current) releaseVoice(ctx, m.current, now, 0.35); // legato bow change
-
     const p = Math.min(1, Math.max(0, pitch01));
     const deg = Math.round(p * (SCALE.length - 1));
     const freq = BASE_FREQ * Math.pow(2, SCALE[deg] / 12);
+
+    const wantPiano =
+      instrument === 'piano' ||
+      (instrument !== 'violin' && estDur < DUET_SPLIT_S);
+    if (wantPiano) {
+      pianoNote(ctx, m, freq);
+      return; // self-terminating: no note-off, no expression tracking
+    }
+
+    if (m.current) releaseVoice(ctx, m.current, now, 0.35); // legato bow change
 
     // Voice: two detuned saws → lowpass → envelope; vibrato LFO on both.
     const osc1 = ctx.createOscillator();
@@ -283,7 +354,7 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
       const old = m.voices.shift();
       try { old.osc1.stop(); old.osc2.stop(); old.vib.stop(); } catch { /* noop */ }
     }
-  }, [ensureCtx, ensureMusic, releaseVoice, enabledRef]);
+  }, [ensureCtx, ensureMusic, releaseVoice, pianoNote, enabledRef]);
 
   /** Pen lifted: let the bow come off the string. */
   const noteOff = useCallback(() => {

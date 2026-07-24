@@ -146,6 +146,16 @@ export function usePathAnimation(points, aspect, duration, boardSize = 8, breaks
       normals[2 * i + 1] = tx;
     }
 
+    // Per-vertex: warped time at which this vertex's STROKE finishes (the
+    // cumTime of its last drawn vertex). Lets note-on estimate how long the
+    // stroke will sing → instrument choice (long bow vs short piano hit).
+    const strokeEnd = new Float32Array(n);
+    let end = cumTime[n - 1];
+    for (let i = n - 1; i >= 0; i--) {
+      if (i < n - 1 && isTravel[i]) end = cumTime[i]; // vertex i ends a stroke
+      strokeEnd[i] = end;
+    }
+
     // Raw elapsed seconds → pace-warped time on the cumTime axis.
     const warp = (elapsed) =>
       paceEnvelope(THREE.MathUtils.clamp(elapsed / duration, 0, 1)) * duration;
@@ -175,8 +185,8 @@ export function usePathAnimation(points, aspect, duration, boardSize = 8, breaks
     return {
       getPoint, duration, worldPoints,
       // Exposed for the exact-append ink renderer (InkTrail) and the
-      // stroke-music expression (curveNorm):
-      cumTime, isTravel, normals, curveNorm, warp,
+      // stroke-music expression (curveNorm, strokeEnd):
+      cumTime, isTravel, normals, curveNorm, strokeEnd, warp,
     };
   }, [points, aspect, duration, boardSize, breaks]);
 }

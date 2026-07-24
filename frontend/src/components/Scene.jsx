@@ -72,7 +72,11 @@ export default function Scene({
     const curve = down ? anim.curveNorm[idx] : 0;
     if (curveRef) curveRef.current = curve;
     if (active && down && !prevDown.current) {
-      onNoteOn?.(penTip.current.y / BOARD_SIZE + 0.5, curve);
+      // Estimated seconds this stroke will take (its end time on the warped
+      // clock minus now) → duet mode picks violin (long) vs piano (short).
+      const estDur =
+        anim.strokeEnd[idx] - anim.warp(clock.current.elapsed);
+      onNoteOn?.(penTip.current.y / BOARD_SIZE + 0.5, curve, estDur);
     } else if (active && !down && prevDown.current) {
       onNoteOff?.();
     }

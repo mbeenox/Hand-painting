@@ -15,6 +15,7 @@ const PRESETS = {
 const SWATCHES = ['#141428', '#0d0d14', '#3a2f2a', '#1e3a5f', '#5a1f2e'];
 const DETAILS = [['fine', 'Fine'], ['std', 'Standard'], ['dense', 'Dense']];
 const MODES = [['trace', 'Portrait'], ['scribble', 'One-line']];
+const INSTRUMENTS = [['duet', 'Duet'], ['violin', 'Violin'], ['piano', 'Piano']];
 
 const ui = {
   wrap: { position: 'absolute', left: 16, bottom: 16, zIndex: 11, fontFamily: 'Georgia, serif' },
@@ -113,6 +114,21 @@ export default function ControlsPanel({ settings, onChange }) {
               {DETAILS.map(([v, lbl]) => (
                 <button key={v} style={ui.segBtn(settings.detail === v)}
                   onClick={() => onChange({ detail: v })}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={ui.row}>
+            <span style={ui.label}>Instrument · with 🔊 on</span>
+            <div style={ui.seg}>
+              {INSTRUMENTS.map(([v, lbl]) => (
+                <button key={v} style={ui.segBtn((settings.instrument ?? 'duet') === v)}
+                  title={v === 'duet'
+                    ? 'Long strokes bowed on violin, short flicks struck on piano'
+                    : v === 'violin' ? 'All strokes bowed' : 'All strokes struck'}
+                  onClick={() => onChange({ instrument: v })}>
                   {lbl}
                 </button>
               ))}
