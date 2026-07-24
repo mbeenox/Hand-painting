@@ -238,3 +238,81 @@ prod poll) and gets a CLAUDE.md revision entry + don't-regress notes.
   assets lazy-load (glb, gifenc worker), nothing new on the critical path.
 - localStorage writes always inside try/catch (private-mode quota = 0).
 - Each phase updates `CLAUDE.md` history + the project doc mirror.
+
+---
+
+# Phase 5 — "The gift & the habit" (added 2026-07-24, after Phases 1–3 + 4.1 shipped)
+
+Chosen directions: the writing hand · reveal/replay/friction batch · daily
+masterpiece · share pages. Sequenced by magic-per-effort; 4.2 (rigged hand)
+and 4.3 (two-photo duet) remain open from Phase 4 and can interleave.
+
+## 5.1 The hand writes — dedications & signature (M) — FIRST
+**Buys:** turns the app into a gift-maker; the pen that drew Mom also writes
+"Happy birthday, Mom" — and every letter plays its notes.
+**Design:** vendor a public-domain Hershey single-stroke font (futural.jhf,
+~20 KB, in repo; JHF parser ~20 lines) → `lib/hershey.js` exposing
+`textToStrokes(text, {height, maxWidth})` → normalized polylines + breaks,
+same format as backend strokes. Client-side only, no backend change:
+`App.handleImage` appends the caption strokes AFTER truncation (a dedication
+is always written in full, regardless of Completeness), positioned in a
+bottom caption band (y slightly below the drawing region; verify camera
+framing tolerates it), scaled ~4.5% board height, capped ~40 chars.
+Optional "Sign & date" toggle writes a small `hypnotic hand · <date>`
+bottom-right instead/in addition. UI: "Dedication" text field on the idle
+screen under the upload buttons (persisted per session, not localStorage —
+dedications are per-gift). Music: letters are short strokes → naturally
+struck piano; no special-casing.
+**Risks:** camera/board framing of the caption band; pathLength grows →
+adaptive duration already handles; InkTrail buffer headroom (letters are
+few hundred points — fine). Verify JHF licence note in README (public
+domain, US Gov).
+**Accept:** dedication drawn stroke-by-stroke after the portrait with pen
+lifts between letters, plays notes, appears in PNG/video/GIF exports,
+respects ink/paper; empty field = today's behaviour byte-identical.
+
+## 5.2 Reveal, replay & friction batch (S+S+S+S)
+- **Ghost reveal:** on done, crossfade the source photo (kept client-side as
+  an object URL) at ~12% opacity under the drawing for 2s, then fade out —
+  "look what it caught". Captured in the video (it happens inside the
+  recording window before the 2.6s stop).
+- **Instant replay:** button on done → re-run the SAME pathData/timetable at
+  4× speed (no backend call, no new randomness). Recording not re-armed.
+- **Redraw:** keep the last uploaded blob in a ref; "Redraw ↻" on done runs
+  the FULL pipeline again → new strokes, new melody (the app's thesis in
+  one click).
+- **Drag & drop:** dropzone on the idle overlay → existing onImage path.
+**Accept:** all four work on desktop+mobile; ghost reveal visible in saved
+video; replay does not add gallery entries or restart recording.
+
+## 5.3 Daily masterpiece (M)
+**Buys:** a shared daily prompt and a reason to return; zero content risk.
+**Design:** The Met Open Access API (CC0): pick deterministically by date
+(seeded from YYYY-MM-DD) from a curated object-ID list (~200 paintings with
+`primaryImageSmall`, portrait-ish, pre-vetted once and committed as JSON).
+Idle screen: "Today's masterpiece" chip with thumbnail → fetch image →
+existing onImage path. Cache the day's pick in localStorage. CORS: Met
+images allow cross-origin fetch; if a fetch fails, chip hides (never blocks
+the core flow). Credit line shown per Met guidelines.
+**Accept:** same artwork offered to everyone on a given date; one click →
+drawing; offline/API-down degrades to hiding the chip.
+
+## 5.4 Share pages (L) — LAST, the infrastructure step
+**Buys:** results get URLs; the watermark finally has somewhere to point.
+**Design sketch (decisions needed before build):** Vercel Blob for the
+composited mp4/webm + still; `/api/share` POST (size-capped ~15 MB,
+rate-limited) returns a short ID; `/s/[id]` page (static shell + fetch)
+with OG tags (still as og:image, video as og:video). Retention: 30 days
+default. Moderation stance: uploads are user-initiated shares of their own
+drawings (line art, not photos — the source photo NEVER leaves the device;
+only the abstracted drawing is shared) + report-and-remove email address +
+per-IP rate limit. OPEN DECISIONS for the owner: retention window, whether
+sharing requires a confirm dialog explaining what's uploaded, custom domain
+first? Build only after 5.1–5.3.
+**Risks:** hosting user content (mitigated: drawings are abstractions, not
+photos); storage cost (Blob free tier, 30-day retention); link rot vs
+retention trade-off.
+
+Guardrails: everything client-side stays quota-safe; nothing new on the
+first-paint critical path (Hershey font + Met JSON lazy); every feature gets
+the standard verify pipeline + CLAUDE.md entry.
