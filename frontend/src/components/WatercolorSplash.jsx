@@ -12,6 +12,10 @@
  */
 import React, { useMemo } from 'react';
 
+// Default pigment set = the ivory paper's pastels; each paper stock brings
+// its own harmonized pairs via the `palettes` prop (see lib/papers.js for
+// the art rationale — pastels on light grounds, jewel tones on dark, a
+// tonal Prussian wash on the cyanotype).
 const PALETTES = [
   ['#f4a9b8', '#e05c6e'], // rose
   ['#9bd0e8', '#3a7ca5'], // cerulean
@@ -44,10 +48,10 @@ function makeBlobPath(cx, cy, baseR, rng) {
   return d + ' Z';
 }
 
-export default function WatercolorSplash({ count = 3, intensity = 1 }) {
+export default function WatercolorSplash({ count = 3, intensity = 1, palettes = PALETTES }) {
   const blobs = useMemo(() => {
     const rng = Math.random; // fresh randomness on every mount (per run)
-    const chosen = [...PALETTES].sort(() => rng() - 0.5).slice(0, count);
+    const chosen = [...palettes].sort(() => rng() - 0.5).slice(0, count);
     return chosen.map(([light, dark], i) => ({
       id: i,
       light,
@@ -55,7 +59,7 @@ export default function WatercolorSplash({ count = 3, intensity = 1 }) {
       d: makeBlobPath(18 + rng() * 64, 18 + rng() * 64, 12 + rng() * 14, rng),
       opacity: 0.28 + rng() * 0.2,
     }));
-  }, [count]);
+  }, [count, palettes]);
 
   return (
     <svg

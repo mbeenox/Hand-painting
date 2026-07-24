@@ -20,8 +20,10 @@ const PAPER = '#f6f1e7';
 // Export watermark (Feature 1.2): every shared clip/still names its source.
 // Drawn ONLY in composite() — the one path every export (PNG, video, and any
 // future GIF) flows through — so the on-screen canvas never shows it.
+// The caption colour comes from the paper stock (dark ink-blue on light
+// papers, warm chalk on dark ones — same quiet presence on every ground).
 const WATERMARK = 'drawn & composed at hand-painting-one.vercel.app';
-const WM_INK = 'rgba(30, 58, 95, 0.45)'; // ink-blue @ 45%
+const WM_INK = 'rgba(30, 58, 95, 0.45)'; // ivory default
 const PNG_MAX = 1600;   // long-side cap for the still image
 const VIDEO_MAX = 960;  // long-side cap for the recording (keeps encoding light)
 const VIDEO_FPS = 24;
@@ -67,7 +69,10 @@ function pickMime() {
   );
 }
 
-export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, paper = PAPER) {
+export function useDrawCapture(
+  canvasElRef, splashRef, getAudioStream = null,
+  paper = PAPER, wmInk = WM_INK
+) {
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const rafRef = useRef(0);
@@ -124,14 +129,14 @@ export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, pa
         const pad = Math.round(size * 0.9);
         ctx.save();
         ctx.font = `italic ${size}px Georgia, serif`;
-        ctx.fillStyle = WM_INK;
+        ctx.fillStyle = wmInk;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'bottom';
         ctx.fillText(WATERMARK, w - pad, h - pad);
         ctx.restore();
       } catch { /* export still succeeds unwatermarked */ }
     },
-    [canvasElRef, paper]
+    [canvasElRef, paper, wmInk]
   );
 
   const start = useCallback(async () => {

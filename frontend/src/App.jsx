@@ -21,8 +21,10 @@ import { useDrawCapture } from './hooks/useDrawCapture.js';
 import { useDrawSound } from './hooks/useDrawSound.js';
 import { useGallery } from './hooks/useGallery.js';
 import { processImage } from './api.js';
+import { getPaper, DEFAULT_PAPER } from './lib/papers.js';
 
 const DEFAULT_SETTINGS = {
+  paper: DEFAULT_PAPER, // paper stock: 'ivory' | 'noir' | 'kraft' | 'slate'
   inkColor: '#141428',
   weight: 1.0,   // stroke boldness multiplier
   seconds: 30,   // draw duration (manual, when autoTime is off)
@@ -136,10 +138,14 @@ export default function App() {
     startScratch, stopScratch, startMusic, stopMusic,
     noteOn, noteOff, chime, setSoundEnabled, getAudioStream,
   } = useDrawSound(soundOnRef, speedRef, curveRef, settingsRef);
+  // Paper stock: ground colour + harmonized inks/splashes/UI tints.
+  const paper = getPaper(settings.paper);
+
   // Sound hook first: the capture takes its audio stream so the saved video
-  // carries the stroke-violin performance.
+  // carries the stroke-violin performance. Exports composite on the CURRENT
+  // paper and caption in its watermark colour.
   const { start, stop, snapshotPNG, video, gif, recSupported } =
-    useDrawCapture(glElRef, splashRef, getAudioStream);
+    useDrawCapture(glElRef, splashRef, getAudioStream, paper.bg, paper.watermark);
   const { entries: galleryEntries, addEntry, removeEntry, clear: clearGallery } =
     useGallery();
 
@@ -236,6 +242,7 @@ export default function App() {
         mode: s.mode ?? 'trace',
         detail: s.detail,
         instrument: s.instrument ?? 'duet',
+        paper: s.paper ?? DEFAULT_PAPER,
         seconds,
         strokes: pathData?.breaks?.length || undefined,
       });
@@ -321,7 +328,7 @@ export default function App() {
   );
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#f6f1e7' }}>
+    <div style={{ position: 'fixed', inset: 0, background: paper.bg }}>
       <div
         ref={splashRef}
         style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
@@ -332,7 +339,11 @@ export default function App() {
             className="hh-fade-in"
             style={{ position: 'absolute', inset: 0 }}
           >
-            <WatercolorSplash count={3} intensity={settings.splash} />
+            <WatercolorSplash
+              count={3}
+              intensity={settings.splash}
+              palettes={paper.splashes}
+            />
           </div>
         )}
       </div>
@@ -350,6 +361,7 @@ export default function App() {
       )}
       <UploadPanel
         phase={phase}
+        paper={paper}
         error={error}
         onImage={handleImage}
         onReset={reset}
@@ -365,6 +377,7 @@ export default function App() {
       />
       {galleryOpen && (
         <GalleryWall
+          paper={paper}
           entries={galleryEntries}
           onRemove={removeEntry}
           onClear={clearGallery}

@@ -53,8 +53,15 @@ const styles = {
 export default function UploadPanel({
   phase, error, onImage, onReset,
   onDownloadImage, onShare, shareSupported, videoUrl, videoExt = 'webm',
-  gifUrl = null, galleryCount = 0, onOpenGallery = null,
+  gifUrl = null, galleryCount = 0, onOpenGallery = null, paper = null,
 }) {
+  // Paper-stock tints: the idle screen should read as the same sheet of
+  // paper the drawing will happen on, not a white app floating over it.
+  const overlayStyle = paper
+    ? { ...styles.overlay, background: paper.overlay }
+    : styles.overlay;
+  const titleStyle = paper ? { ...styles.title, color: paper.text } : styles.title;
+  const subStyle = paper ? { ...styles.sub, color: paper.sub } : styles.sub;
   const fileRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -139,7 +146,7 @@ export default function UploadPanel({
   }
 
   return (
-    <div style={styles.overlay}>
+    <div style={overlayStyle}>
       {galleryCount > 0 && onOpenGallery && (
         <div style={styles.corner}>
           <button
@@ -151,8 +158,8 @@ export default function UploadPanel({
           </button>
         </div>
       )}
-      <h1 style={styles.title}>Hypnotic Hand</h1>
-      <p style={styles.sub}>
+      <h1 style={titleStyle}>Hypnotic Hand</h1>
+      <p style={subStyle}>
         Upload a photo — a hand will draw it as one continuous line.
       </p>
       {error && <p style={styles.err}>⚠ {error}</p>}
@@ -163,7 +170,7 @@ export default function UploadPanel({
             <circle cx="23" cy="23" r="19" fill="none" stroke="#1a1a2e" strokeOpacity="0.15" strokeWidth="3" />
             <path d="M23 4 a19 19 0 0 1 19 19" fill="none" stroke="#1a1a2e" strokeWidth="3" strokeLinecap="round" />
           </svg>
-          <p style={styles.sub}>Tracing your portrait…</p>
+          <p style={subStyle}>Tracing your portrait…</p>
         </div>
       ) : cameraOn ? (
         <>
@@ -180,7 +187,7 @@ export default function UploadPanel({
             <button style={styles.button} onClick={startCamera}>Use camera</button>
           </div>
           <div style={styles.sampleRow}>
-            <span style={styles.sampleHint}>…or watch a sample</span>
+            <span style={paper ? { ...styles.sampleHint, color: paper.sub } : styles.sampleHint}>…or watch a sample</span>
             {SAMPLES.map((s) => (
               <button
                 key={s.src}

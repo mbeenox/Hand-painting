@@ -6,13 +6,18 @@
  * recolours a finished piece live.
  */
 import React, { useState } from 'react';
+import { PAPERS, getPaper } from '../lib/papers.js';
 
+// Presets are COMPLETE LOOKS — paper + ink + line + wash chosen together,
+// the way a printmaker specs a plate. The last two showcase the dark grounds:
+// chalk-on-black and a cyanotype blueprint.
 const PRESETS = {
-  'Fine liner': { inkColor: '#141428', weight: 0.7, seconds: 26, splash: 0.55, detail: 'std',   mode: 'trace' },
-  'Bold ink':   { inkColor: '#0d0d14', weight: 1.5, seconds: 30, splash: 1.0,  detail: 'std',   mode: 'trace' },
-  'Sketch':     { inkColor: '#3a2f2a', weight: 1.0, seconds: 34, splash: 1.3,  detail: 'dense', mode: 'scribble' },
+  'Fine liner': { paper: 'ivory', inkColor: '#141428', weight: 0.7, seconds: 26, splash: 0.55, detail: 'std',   mode: 'trace' },
+  'Bold ink':   { paper: 'ivory', inkColor: '#0d0d14', weight: 1.5, seconds: 30, splash: 1.0,  detail: 'std',   mode: 'trace' },
+  'Sketch':     { paper: 'kraft', inkColor: '#2a2118', weight: 1.0, seconds: 34, splash: 1.3,  detail: 'dense', mode: 'scribble' },
+  'Chalk noir': { paper: 'noir',  inkColor: '#f2ede3', weight: 1.3, seconds: 32, splash: 0.9,  detail: 'std',   mode: 'trace' },
+  'Blueprint':  { paper: 'slate', inkColor: '#f4f7f6', weight: 0.7, seconds: 28, splash: 0.7,  detail: 'fine',  mode: 'trace' },
 };
-const SWATCHES = ['#141428', '#0d0d14', '#3a2f2a', '#1e3a5f', '#5a1f2e'];
 const DETAILS = [['fine', 'Fine'], ['std', 'Standard'], ['dense', 'Dense']];
 const MODES = [['trace', 'Portrait'], ['scribble', 'One-line']];
 const INSTRUMENTS = [['duet', 'Duet'], ['violin', 'Violin'], ['piano', 'Piano']];
@@ -37,11 +42,18 @@ const ui = {
   },
   row: { display: 'flex', flexDirection: 'column', gap: 6 },
   label: { fontSize: 11, color: '#5a5a6e', textTransform: 'uppercase', letterSpacing: 0.6 },
-  presets: { display: 'flex', gap: 6 },
+  presets: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   preset: {
-    flex: 1, padding: '7px 0', fontSize: 12.5, border: '1.5px solid #1a1a2e',
-    borderRadius: 999, background: '#fff', color: '#1a1a2e', cursor: 'pointer',
+    flexBasis: '31%', flexGrow: 1, padding: '7px 0', fontSize: 12.5,
+    border: '1.5px solid #1a1a2e', borderRadius: 999, background: '#fff',
+    color: '#1a1a2e', cursor: 'pointer',
   },
+  papers: { display: 'flex', gap: 8 },
+  paperChip: (bg, on, ring) => ({
+    flex: 1, height: 34, borderRadius: 10, cursor: 'pointer', background: bg,
+    border: on ? `3px solid ${ring}` : '2px solid #cfc7ba',
+    boxShadow: on ? 'inset 0 0 0 2px #fff' : 'none',
+  }),
   swatches: { display: 'flex', gap: 9 },
   seg: { display: 'flex', gap: 4 },
   segBtn: (on) => ({
@@ -53,10 +65,22 @@ const ui = {
 
 export default function ControlsPanel({ settings, onChange }) {
   const [open, setOpen] = useState(false);
+  const paper = getPaper(settings.paper);
   const swatch = (c) => ({
     width: 26, height: 26, borderRadius: 999, background: c, cursor: 'pointer',
     border: settings.inkColor === c ? '3px solid #1a1a2e' : '2px solid #cfc7ba',
   });
+
+  // Switching paper keeps the ink ONLY if it belongs to the new stock's
+  // palette — otherwise the paper's house ink takes over. Value contrast
+  // between ink and ground is non-negotiable (dark ink would sink into
+  // the noir sheet; chalk would vanish on ivory).
+  const pickPaper = (key) => {
+    const next = getPaper(key);
+    const patch = { paper: key };
+    if (!next.inks.includes(settings.inkColor)) patch.inkColor = next.inks[0];
+    onChange(patch);
+  };
 
   return (
     <div style={ui.wrap}>
@@ -71,9 +95,25 @@ export default function ControlsPanel({ settings, onChange }) {
           </div>
 
           <div style={ui.row}>
-            <span style={ui.label}>Ink</span>
+            <span style={ui.label}>Paper</span>
+            <div style={ui.papers}>
+              {Object.entries(PAPERS).map(([key, p]) => (
+                <div
+                  key={key}
+                  style={ui.paperChip(p.bg, (settings.paper ?? 'ivory') === key, '#1a1a2e')}
+                  title={`${p.label} paper`}
+                  aria-label={`${p.label} paper`}
+                  role="button"
+                  onClick={() => pickPaper(key)}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div style={ui.row}>
+            <span style={ui.label}>Ink · for {paper.label.toLowerCase()}</span>
             <div style={ui.swatches}>
-              {SWATCHES.map((c) => (
+              {paper.inks.map((c) => (
                 <div key={c} style={swatch(c)} title={c} onClick={() => onChange({ inkColor: c })} />
               ))}
             </div>

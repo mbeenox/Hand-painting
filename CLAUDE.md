@@ -189,6 +189,35 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Paper stocks: canvas colour done the printmaker's way (2026-07-24)** —
+  `lib/papers.js` defines four curated PAPER STOCKS instead of a free
+  colour picker (mid-value paper + mid-value ink = mud; value contrast is
+  what makes line work read). Each stock = ground colour + 5 contrast-safe
+  inks (first = house ink) + splash pigment pairs + watermark colour + UI
+  text/overlay tints:
+  · **Ivory** (default) — the original; classic drawing inks, pastels.
+  · **Noir** — warm charcoal-black `#131316` (NEVER pure #000 — dead
+    screen, kills pooling nuance); chalk/gold/vermilion/celadon/rose
+    body-colour; deep JEWEL splash tones (pastels on black look
+    chalk-dusty). White-chalk-on-black-paper tradition.
+  · **Kraft** — packing-paper tan; carbon + white gouache + oxide/indigo/
+    hooker; gouache earth splashes. Classic sketchbook combo.
+  · **Slate** — Prussian cyanotype; blueprint-white + pale cyan/chamois/
+    coral/mint; TONAL Prussian washes only (a cyanotype stays monochrome —
+    that restraint IS the look).
+  Wiring: `settings.paper` ('ivory' default) → App root bg, splash
+  `palettes` prop, `useDrawCapture(paper.bg, paper.watermark)` (exports +
+  watermark adapt), UploadPanel/GalleryWall overlay+text tints, gallery
+  meta gains `paper`. ControlsPanel: Paper chip row + per-paper ink
+  swatches; **switching paper keeps the ink ONLY if it belongs to the new
+  stock's palette, else the house ink takes over** (contrast invariant).
+  PRESETS became complete looks (paper+ink+line+wash): Fine liner ·
+  Bold ink · Sketch (now kraft) · **Chalk noir** · **Blueprint**.
+  E2E: selects Noir before the sample draw, asserts paper + ink
+  auto-switch in localStorage; screenshot verified chalk-on-black with
+  jewel splashes. Note: pen barrel (#1a1a2e) is low-contrast on noir but
+  reads fine (lit StandardMaterial + gold ferrule + skin hand).
+
 - **Sound defaults flip + Phase 4.1 ink-bleed shader (2026-07-24)** —
   (a) **Sound ON by default, pen scratch OFF by default.** `settings.sound`
   (persisted; the 🔊 toggle writes it) initializes `soundOn`; the

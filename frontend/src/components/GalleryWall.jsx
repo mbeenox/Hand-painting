@@ -81,14 +81,20 @@ function saveThumb(e) {
   a.remove();
 }
 
-export default function GalleryWall({ entries, onRemove, onClear, onClose }) {
+export default function GalleryWall({ entries, onRemove, onClear, onClose, paper = null }) {
   const [selected, setSelected] = useState(null); // entry | null
   const sel = selected && entries.find((e) => e.id === selected.id) ? selected : null;
+  // Wall tinted to the current paper stock; thumbnails carry their own
+  // baked-in grounds, so mixed-paper collections read like a real pinboard.
+  const overlayStyle = paper
+    ? { ...ui.overlay, background: paper.overlay.replace(/[\d.]+\)$/, '0.97)') }
+    : ui.overlay;
+  const titleStyle = paper ? { ...ui.title, color: paper.text } : ui.title;
 
   return (
-    <div style={ui.overlay} role="dialog" aria-label="Gallery">
+    <div style={overlayStyle} role="dialog" aria-label="Gallery">
       <div style={ui.header}>
-        <h2 style={ui.title}>Gallery</h2>
+        <h2 style={titleStyle}>Gallery</h2>
         {entries.length > 0 && (
           <button
             style={ui.btn}
@@ -101,7 +107,7 @@ export default function GalleryWall({ entries, onRemove, onClear, onClose }) {
       </div>
 
       {entries.length === 0 ? (
-        <p style={ui.empty}>
+        <p style={paper ? { ...ui.empty, color: paper.sub } : ui.empty}>
           Nothing here yet — finished drawings collect on this wall automatically.
         </p>
       ) : (

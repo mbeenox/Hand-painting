@@ -128,6 +128,19 @@ with sync_playwright() as p:
     page.click("text=Draw another ↺")
     page.wait_for_selector("button[aria-label^='Draw sample']", timeout=10000)
 
+    # Paper stocks: switch to Noir — the ink must auto-switch to the paper's
+    # house ink (chalk white), because the previous dark ink would sink into
+    # the black ground. The sample draw below then runs white-on-black.
+    page.click("text=⚙ Style")
+    page.click("div[aria-label='Noir paper']")
+    st = page.evaluate(
+        "() => JSON.parse(localStorage.getItem('hh-settings-v1') || '{}')"
+    )
+    assert st.get("paper") == "noir", f"paper not switched: {st.get('paper')}"
+    assert st.get("inkColor") == "#f2ede3", \
+        f"ink should auto-switch to chalk on noir, got {st.get('inkColor')}"
+    page.click("text=⚙ Style")
+
     # Feature 2.1: the finished drawing landed on the gallery wall.
     stored = page.evaluate(
         "() => JSON.parse(localStorage.getItem('hh-gallery-v1') || '[]')"
