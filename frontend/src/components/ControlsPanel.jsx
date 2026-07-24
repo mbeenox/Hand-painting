@@ -16,6 +16,13 @@ const SWATCHES = ['#141428', '#0d0d14', '#3a2f2a', '#1e3a5f', '#5a1f2e'];
 const DETAILS = [['fine', 'Fine'], ['std', 'Standard'], ['dense', 'Dense']];
 const MODES = [['trace', 'Portrait'], ['scribble', 'One-line']];
 const INSTRUMENTS = [['duet', 'Duet'], ['violin', 'Violin'], ['piano', 'Piano']];
+const MOODS = [['dawn', 'Dawn'], ['dusk', 'Dusk'], ['sakura', 'Sakura'], ['hymn', 'Hymn']];
+const MOOD_HINTS = {
+  dawn: 'C major pentatonic · bright — the original',
+  dusk: 'A minor pentatonic · darker bow, deeper vibrato',
+  sakura: 'D hirajoshi · spare and koto-like, mostly struck',
+  hymn: 'F Lydian · solemn, slow vibrato, mostly bowed',
+};
 
 const ui = {
   wrap: { position: 'absolute', left: 16, bottom: 16, zIndex: 11, fontFamily: 'Georgia, serif' },
@@ -142,6 +149,19 @@ export default function ControlsPanel({ settings, onChange }) {
                 <button key={lbl} style={ui.segBtn((settings.scratch ?? true) === v)}
                   title="The nib-on-paper hiss that tracks pen speed"
                   onClick={() => onChange({ scratch: v })}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={ui.row}>
+            <span style={ui.label}>Mood · with 🔊 on</span>
+            <div style={ui.seg}>
+              {MOODS.map(([v, lbl]) => (
+                <button key={v} style={ui.segBtn((settings.mood ?? 'dawn') === v)}
+                  title={MOOD_HINTS[v]}
+                  onClick={() => onChange({ mood: v })}>
                   {lbl}
                 </button>
               ))}

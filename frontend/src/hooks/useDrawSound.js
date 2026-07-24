@@ -9,8 +9,9 @@
  *   • STROKE VIOLIN = the drawing plays itself (Feature #6). Every stroke is a
  *     bowed note: pen lands → note-on, pen lifts → release. The mapping is what
  *     keeps random strokes MUSICAL:
- *       – pitch    = stroke's height on the canvas, QUANTIZED to a C-major
- *         pentatonic scale over two octaves (pentatonic notes cannot clash);
+ *       – pitch    = stroke's height on the canvas, QUANTIZED to the current
+ *         MOOD's scale over two octaves (scales are chosen so random degrees
+ *         cannot clash with the mood's drone — see MOODS below);
  *       – duration = how long the stroke takes to draw (long contour → sustained
  *         tone, tiny detail flick → staccato — sub-90ms strokes fold into the
  *         ringing note instead of spamming new ones);
@@ -39,19 +40,77 @@
  */
 import { useCallback, useEffect, useRef } from 'react';
 
-// C-major pentatonic, two octaves up from C4 — semitone offsets from BASE_FREQ.
-const SCALE = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24];
-const BASE_FREQ = 261.63; // C4
+/**
+ * MOODS (Feature 3.1) — each mood is a complete musical identity: melody
+ * scale (semitone offsets from `base`, 11 degrees ≈ two octaves so the
+ * height→pitch mapping keeps its resolution), drone chord, drone colour,
+ * bow-brightness range (filterBase + filterSpan·speed), vibrato character,
+ * duet split bias, and a completion chime built from the mood's own scale.
+ *
+ * THE INVARIANT (non-negotiable): every scale degree must sit consonantly
+ * over its mood's drone — stroke pitches are effectively random, so no
+ * random combination may clash. Verified programmatically by
+ * `verify_moods.py` (Plomp–Levelt roughness of every scale tone against the
+ * drone chord, thresholds calibrated against known-dissonant controls),
+ * which PARSES this table from the source — keep the field layout
+ * machine-readable: one `base:`, one `scale: [...]`, one `drone: [...]`
+ * per mood block.
+ */
+const MOODS = {
+  dawn: { // the original: C major pentatonic, bright
+    base: 261.63, // C4
+    scale: [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24], // C D E G A ×2 octaves
+    drone: [65.41, 98.00, 130.81], // C2 G2 C3
+    droneLevel: 0.042, droneLP: 320,
+    filterBase: 900, filterSpan: 2600,
+    vibDepth: 1.0, vibRate: 1.0,
+    duetSplit: 0.5,
+    chime: [523.25, 659.25, 783.99], // C5 E5 G5
+  },
+  dusk: { // A minor pentatonic, darker lowpass, deeper vibrato — moody portraits
+    base: 220.00, // A3
+    scale: [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24], // A C D E G ×2
+    drone: [55.00, 82.41, 110.00], // A1 E2 A2
+    droneLevel: 0.048, droneLP: 260,
+    filterBase: 700, filterSpan: 1400, // cap ~2100 (vs Dawn's ~3500)
+    vibDepth: 1.45, vibRate: 0.9,
+    duetSplit: 0.5,
+    chime: [440.00, 523.25, 659.25], // A4 C5 E5
+  },
+  sakura: { // D hirajoshi — spare, koto-like; piano-biased duet
+    base: 293.66, // D4
+    scale: [0, 1, 5, 7, 10, 12, 13, 17, 19, 22, 24], // D E♭ G A B♭ ×2
+    drone: [73.42, 110.00], // D2 A2 (open fifth — leaves the ♭2/♭6 as colour)
+    droneLevel: 0.040, droneLP: 300,
+    filterBase: 850, filterSpan: 2200,
+    vibDepth: 0.8, vibRate: 1.1,
+    duetSplit: 0.8, // most strokes struck
+    chime: [587.33, 880.00, 1174.66], // D5 A5 D6 — open fifths, no ♭2
+  },
+  hymn: { // F Lydian pentatonic subset — solemn, violin-biased, slow vibrato
+    base: 174.61, // F3
+    scale: [0, 2, 4, 7, 11, 12, 14, 16, 19, 23, 24], // F G A C E ×2
+    drone: [43.65, 65.41, 87.31], // F1 C2 F2
+    droneLevel: 0.050, droneLP: 240,
+    filterBase: 800, filterSpan: 1800,
+    vibDepth: 1.1, vibRate: 0.7,
+    duetSplit: 0.35, // most strokes bowed
+    chime: [349.23, 440.00, 523.25], // F4 A4 C5
+  },
+};
+const DEFAULT_MOOD = 'dawn';
+
 const MAX_VOICES = 5;     // safety cap on overlapping violin releases
 const RETRIGGER_S = 0.09; // min seconds between note-ons (folds micro-strokes)
 const MIN_NOTE_S = 0.13;  // shortest audible note even for instant lifts
 const SPEED_NORM = 25;    // world-units/sec that counts as "fast bowing"
-const DUET_SPLIT_S = 0.5; // duet mode: strokes shorter than this → piano,
-                          // longer → bowed violin (sustains suit long lines,
-                          // percussive hits suit detail flicks)
 const MAX_PIANOS = 24;    // safety cap on simultaneously ringing piano notes
 
 export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
+  // Mood applies per run (like detail): startMusic pins it on the music
+  // state; noteOn/chime fall back to the live setting when no run is active.
+  const currentMood = () =>
+    MOODS[settingsRef?.current?.mood] || MOODS[DEFAULT_MOOD];
   const ctxRef = useRef(null);
   const masterRef = useRef(null);    // one bus everything plays through
   const mediaDestRef = useRef(null); // tap of that bus for video recording
@@ -146,12 +205,17 @@ export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
       if (v && enabledRef.current) {
         const spd01 = Math.min(1, spd / SPEED_NORM);
         const curve = (curveRef && curveRef.current) || 0;
+        const md = v.mood || MOODS[DEFAULT_MOOD];
         try {
-          v.filter.frequency.setTargetAtTime(900 + 2600 * spd01, ctx.currentTime, 0.08);
-          v.vibGain.gain.setTargetAtTime(
-            v.freq * 0.009 * (0.25 + 0.75 * curve), ctx.currentTime, 0.1
+          v.filter.frequency.setTargetAtTime(
+            md.filterBase + md.filterSpan * spd01, ctx.currentTime, 0.08
           );
-          v.vib.frequency.setTargetAtTime(5.0 + 1.6 * curve, ctx.currentTime, 0.15);
+          v.vibGain.gain.setTargetAtTime(
+            v.freq * 0.009 * md.vibDepth * (0.25 + 0.75 * curve), ctx.currentTime, 0.1
+          );
+          v.vib.frequency.setTargetAtTime(
+            (5.0 + 1.6 * curve) * md.vibRate, ctx.currentTime, 0.15
+          );
         } catch { /* noop */ }
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -245,14 +309,17 @@ export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
     if (ctx.state === 'suspended') ctx.resume();
     const m = ensureMusic();
     if (m.drone) return;
-    // Tonic drone: C2 + G2 + C3, triangle, heavy lowpass, very quiet. A
-    // consonant bed that makes the quantized stroke notes read as a piece.
+    // Tonic drone from the mood's table (e.g. Dawn: C2+G2+C3), triangle,
+    // heavy lowpass, very quiet. A consonant bed that makes the quantized
+    // stroke notes read as a piece. The mood is PINNED here for the run.
+    const mood = currentMood();
+    m.mood = mood;
     const gain = ctx.createGain();
     gain.gain.value = 0.0001;
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 320;
-    const oscs = [65.41, 98.0, 130.81].map((f) => {
+    filter.frequency.value = mood.droneLP;
+    const oscs = mood.drone.map((f) => {
       const o = ctx.createOscillator();
       o.type = 'triangle';
       o.frequency.value = f;
@@ -262,9 +329,10 @@ export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
     });
     filter.connect(gain).connect(masterRef.current);
     try {
-      gain.gain.setTargetAtTime(0.042, ctx.currentTime, 0.9); // slow swell in
+      gain.gain.setTargetAtTime(mood.droneLevel, ctx.currentTime, 0.9); // slow swell in
     } catch { /* noop */ }
     m.drone = { oscs, gain, filter };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ensureCtx, ensureMusic, enabledRef]);
 
   const stopMusic = useCallback(() => {
@@ -304,13 +372,14 @@ export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
     if (now - m.lastOn < RETRIGGER_S) return; // fold micro-strokes into the ringing note
     m.lastOn = now;
 
+    const mood = m.mood || currentMood();
     const p = Math.min(1, Math.max(0, pitch01));
-    const deg = Math.round(p * (SCALE.length - 1));
-    const freq = BASE_FREQ * Math.pow(2, SCALE[deg] / 12);
+    const deg = Math.round(p * (mood.scale.length - 1));
+    const freq = mood.base * Math.pow(2, mood.scale[deg] / 12);
 
     const wantPiano =
       instrument === 'piano' ||
-      (instrument !== 'violin' && estDur < DUET_SPLIT_S);
+      (instrument !== 'violin' && estDur < mood.duetSplit);
     if (wantPiano) {
       pianoNote(ctx, m, freq);
       return; // self-terminating: no note-off, no expression tracking
@@ -328,15 +397,15 @@ export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
     osc2.detune.value = 7; // gentle chorus → "section" warmth
     const vib = ctx.createOscillator();
     vib.type = 'sine';
-    vib.frequency.value = 5.0 + 1.6 * curve01;
+    vib.frequency.value = (5.0 + 1.6 * curve01) * mood.vibRate;
     const vibGain = ctx.createGain();
-    vibGain.gain.value = freq * 0.009 * (0.25 + 0.75 * curve01);
+    vibGain.gain.value = freq * 0.009 * mood.vibDepth * (0.25 + 0.75 * curve01);
     vib.connect(vibGain);
     vibGain.connect(osc1.frequency);
     vibGain.connect(osc2.frequency);
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 1600;
+    filter.frequency.value = mood.filterBase + 700; // rest-bow brightness
     filter.Q.value = 0.7;
     const gain = ctx.createGain();
     gain.gain.value = 0.0001;
@@ -351,7 +420,10 @@ export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
       vib.start(now);
     } catch { /* noop */ }
 
-    const v = { osc1, osc2, vib, vibGain, filter, gain, freq, onAt: now, released: false };
+    const v = {
+      osc1, osc2, vib, vibGain, filter, gain, freq, mood,
+      onAt: now, released: false,
+    };
     m.voices.push(v);
     m.current = v;
     if (m.voices.length > MAX_VOICES) {
@@ -370,7 +442,8 @@ export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
   }, [releaseVoice]);
 
   // ------------------------------------------------------------------
-  // Completion chime (unchanged; C-major triad — consonant with the drone)
+  // Completion chime — the mood's own triad, so it lands consonant with
+  // whatever drone just faded (arpeggiated, soft sines).
   // ------------------------------------------------------------------
   const chime = useCallback(() => {
     if (!enabledRef.current) return;
@@ -378,7 +451,8 @@ export function useDrawSound(enabledRef, speedRef, curveRef, settingsRef) {
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume();
     const now = ctx.currentTime;
-    [523.25, 659.25, 783.99].forEach((f, i) => {
+    const mood = (musicRef.current && musicRef.current.mood) || currentMood();
+    mood.chime.forEach((f, i) => {
       const o = ctx.createOscillator();
       const g = ctx.createGain();
       o.type = 'sine';

@@ -133,6 +133,9 @@ Hard-won deployment facts (do **not** regress):
 
 ## How to verify a change (no full browser required)
 
+- `python3 verify_moods.py` — mood consonance invariant (parses MOODS from
+  the JS; every scale tone must sit well below semitone/tritone controls).
+
 - **Backend:** in a venv with the pinned deps, feed a synthetic edge-rich image
   (draw lines/circles with cv2) through `detect_edges → sample_points →
   jitter_points → nearest_neighbor_path → two_opt → smooth_path → normalize`;
@@ -185,6 +188,34 @@ Hard-won deployment facts (do **not** regress):
   incremental `drawRange` growth, no per-frame rebuilds. `InkTrail.jsx` rewritten;
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
+
+- **Phase 3 — "Musical depth": keys & moods (2026-07-24)** — the music
+  gains four selectable MOODS (`useDrawSound.js` MOODS table; Style panel
+  "Mood" row; `settings.mood`, default dawn). Each mood is a complete
+  identity: melody scale + base register, drone chord + drone colour
+  (level/lowpass), bow-brightness range (filterBase/filterSpan), vibrato
+  depth & rate, duet split bias, and a chime built from its own scale:
+  · **Dawn** — C maj pentatonic over C2+G2+C3 (the original, bright).
+  · **Dusk** — A min pentatonic (base A3) over A1+E2+A2; darker bow (cap
+    ~2100 Hz vs ~3500), deeper vibrato ×1.45.
+  · **Sakura** — D hirajoshi (D E♭ G A B♭, base D4) over an OPEN-FIFTH
+    D2+A2 drone (leaves ♭2/♭6 as colour, no third to fight); piano-biased
+    duet split 0.8s; chime = open fifths D5-A5-D6 (no ♭2).
+  · **Hymn** — F Lydian subset (F G A C E, base F3 — solemn low register)
+    over F1+C2+F2; violin-biased split 0.35s; vibrato rate ×0.7.
+  Mood is PINNED at startMusic (m.mood) so a run stays coherent; voices
+  carry their mood for the per-frame expression tick. The consonance
+  invariant ("random strokes can't clash") is enforced by **verify_moods.py**:
+  it PARSES the MOODS table from the JS source (nothing to drift), models
+  the synth's actual spectra (saw partials behind the rest-bow lowpass;
+  triangle odd partials behind the drone lowpass, real gain levels), scores
+  every scale tone against the drone chord with Plomp–Levelt/Sethares
+  roughness, and requires the worst tone < 0.6× the ugliest sane control
+  (semitone/tritone against the root in the drone's own register). Result:
+  worst tones sit 4–15× below controls in all four moods. E2E now draws in
+  Dusk (non-default) so the parameterized drone/scale/chime paths run.
+  Keep the MOODS field layout machine-readable (one base:/scale:/drone:/
+  droneLP: line per mood) or the verifier's parser breaks.
 
 - **Phase 2 — "Return visits" (2026-07-24)** — both M features from
   `docs/PLAN.md`:

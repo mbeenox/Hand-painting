@@ -31,6 +31,7 @@ const DEFAULT_SETTINGS = {
   detail: 'std', // 'fine' | 'std' | 'dense' → backend point density
   mode: 'trace', // 'trace' (faithful strokes + pen lifts) | 'scribble' (one abstract line)
   instrument: 'duet', // 'duet' | 'violin' | 'piano' → stroke-music voice
+  mood: 'dawn',  // 'dawn' | 'dusk' | 'sakura' | 'hymn' → key/drone/character
   scratch: true, // pen-scratch (nib-on-paper) sound when 🔊 is on
 };
 const SETTINGS_KEY = 'hh-settings-v1';

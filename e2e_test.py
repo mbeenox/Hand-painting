@@ -21,6 +21,12 @@ with sync_playwright() as p:
     # (AudioContext, drone, note on/off per stroke) is exercised too.
     page.click("button[aria-label='Enable sound']")
 
+    # Feature 3.1: draw in a NON-default mood so the mood-parameterized
+    # drone/scale/chime paths run (Dusk = A minor pentatonic, darker bow).
+    page.click("text=⚙ Style")
+    page.click("button:has-text('Dusk')")
+    page.click("text=⚙ Style")  # close the panel again
+
     page.set_input_files("input[type=file]", "backend/test_input.png")
     # wait for processing → drawing (overlay disappears)
     page.wait_for_selector("h1", state="detached", timeout=30000)
