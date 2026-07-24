@@ -186,6 +186,18 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **iPhone-playable video (2026-07-23)** — saved videos now prefer MP4
+  (H.264+AAC): .webm shared to an iPhone often won't play (partial Safari
+  WebM support; Photos/iMessage reject it). `VIDEO_MIMES` order: explicit
+  `avc1+mp4a` strings first (branded Chrome/Edge 126+), webm+opus next
+  (Firefox / codec-less Chromium — those builds accept a BARE 'video/mp4'
+  but mux Opus into it with no AAC encoder → still iPhone-broken, hence
+  bare mp4 LAST; Safari lands there and records H.264+AAC regardless).
+  Blob type/ext from `recorder.mimeType`. E2E asserts the
+  container-appropriate audio box (mp4a/Opus vs OpusHead) — this assertion
+  is what caught the codec-less-mp4 trap. DON'T-REGRESS: never put bare
+  'video/mp4' ahead of the webm+opus candidates.
+
 - **Pen-scratch toggle (2026-07-23)** — `settings.scratch` (default on) +
   a "Pen scratch" On/Off row in the Style panel; the scratch gain loop reads
   it live via `settingsRef` each frame (instant mid-draw response). Music
