@@ -16,8 +16,10 @@ import Scene from './components/Scene.jsx';
 import UploadPanel from './components/UploadPanel.jsx';
 import WatercolorSplash from './components/WatercolorSplash.jsx';
 import ControlsPanel from './components/ControlsPanel.jsx';
+import GalleryWall from './components/GalleryWall.jsx';
 import { useDrawCapture } from './hooks/useDrawCapture.js';
 import { useDrawSound } from './hooks/useDrawSound.js';
+import { useGallery } from './hooks/useGallery.js';
 import { processImage } from './api.js';
 
 const DEFAULT_SETTINGS = {
@@ -53,6 +55,25 @@ function loadSettings() {
   return { ...DEFAULT_SETTINGS };
 }
 
+// Gallery thumbnail (Feature 2.1): the finished still, shrunk to ≤256px long
+// side as a JPEG dataURL (~30–50 KB) — small enough that 24 of them live
+// comfortably in localStorage.
+const THUMB_MAX = 256;
+async function makeThumb(blob) {
+  try {
+    const bmp = await createImageBitmap(blob);
+    const scale = Math.min(1, THUMB_MAX / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.max(2, Math.round(bmp.width * scale));
+    c.height = Math.max(2, Math.round(bmp.height * scale));
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close?.();
+    return c.toDataURL('image/jpeg', 0.72);
+  } catch {
+    return null;
+  }
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -78,6 +99,7 @@ export default function App() {
   const [stillBlob, setStillBlob] = useState(null);
   const [soundOn, setSoundOn] = useState(false);
   const [settings, setSettings] = useState(loadSettings);
+  const [galleryOpen, setGalleryOpen] = useState(false);
 
   const glElRef = useRef(null);
   const splashRef = useRef(null);
@@ -97,8 +119,10 @@ export default function App() {
   } = useDrawSound(soundOnRef, speedRef, curveRef, settingsRef);
   // Sound hook first: the capture takes its audio stream so the saved video
   // carries the stroke-violin performance.
-  const { start, stop, snapshotPNG, video, recSupported } =
+  const { start, stop, snapshotPNG, video, gif, recSupported } =
     useDrawCapture(glElRef, splashRef, getAudioStream);
+  const { entries: galleryEntries, addEntry, removeEntry, clear: clearGallery } =
+    useGallery();
 
   const updateSettings = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), []);
 
@@ -170,6 +194,29 @@ export default function App() {
     snapshotPNG().then((b) => { if (alive && b) setStillBlob(b); });
     return () => { alive = false; };
   }, [video, snapshotPNG]);
+
+  // Gallery (Feature 2.1): once the clean still exists, save a thumbnail +
+  // the settings that produced it. Guarded per run so re-renders can't
+  // double-save.
+  const savedRunRef = useRef(0);
+  useEffect(() => {
+    if (!stillBlob || phase !== 'done' || savedRunRef.current === runId) return;
+    savedRunRef.current = runId;
+    const s = settingsRef.current;
+    const seconds = (s.autoTime ?? true)
+      ? autoDrawSeconds(pathData?.pathLength)
+      : s.seconds;
+    makeThumb(stillBlob).then((thumb) => {
+      if (!thumb) return;
+      addEntry(thumb, {
+        mode: s.mode ?? 'trace',
+        detail: s.detail,
+        instrument: s.instrument ?? 'duet',
+        seconds,
+        strokes: pathData?.breaks?.length || undefined,
+      });
+    });
+  }, [stillBlob, phase, runId, pathData, addEntry]);
 
   // --- sound: scratch + stroke violin while drawing (if enabled),
   //     chime on completion ---
@@ -287,8 +334,19 @@ export default function App() {
         shareSupported={shareSupported}
         videoUrl={video?.url ?? null}
         videoExt={video?.ext ?? 'webm'}
+        gifUrl={gif?.url ?? null}
         recSupported={recSupported}
+        galleryCount={galleryEntries.length}
+        onOpenGallery={() => setGalleryOpen(true)}
       />
+      {galleryOpen && (
+        <GalleryWall
+          entries={galleryEntries}
+          onRemove={removeEntry}
+          onClear={clearGallery}
+          onClose={() => setGalleryOpen(false)}
+        />
+      )}
     </div>
   );
 }

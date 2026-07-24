@@ -83,10 +83,50 @@ with sync_playwright() as p:
     print("watermark-ish pixels in bottom-right box:", wm_px)
     assert wm_px > 40, "export watermark not found in the saved PNG!"
 
+    # Feature 2.2: the GIF finishes encoding right after the recorder stops —
+    # its Save button must appear, and the blob must be a real looping GIF.
+    gif_link = page.wait_for_selector("a[download='hypnotic-hand.gif']",
+                                      timeout=15000)
+    gif_info = page.evaluate(
+        """async (a) => {
+             const buf = await (await fetch(a.href)).arrayBuffer();
+             const b = new Uint8Array(buf);
+             const head = String.fromCharCode(...b.slice(0, 6));
+             // NETSCAPE2.0 app extension = looping GIF
+             const s = 'NETSCAPE2.0';
+             let loops = false;
+             outer: for (let i = 0; i <= b.length - s.length; i++) {
+               for (let j = 0; j < s.length; j++) {
+                 if (b[i + j] !== s.charCodeAt(j)) continue outer;
+               }
+               loops = true; break;
+             }
+             return { head, loops, bytes: b.length };
+           }""",
+        gif_link,
+    )
+    print("saved gif:", gif_info)
+    assert gif_info["head"] == "GIF89a", f"not a GIF: {gif_info['head']!r}"
+    assert gif_info["loops"], "GIF is missing its loop extension"
+    assert gif_info["bytes"] > 100_000, "GIF suspiciously small"
+
     # Feature 1.1 end-to-end: draw another → one click on a sample chip must
     # reach a live drawing (no upload dialog involved).
     page.click("text=Draw another ↺")
     page.wait_for_selector("button[aria-label^='Draw sample']", timeout=10000)
+
+    # Feature 2.1: the finished drawing landed on the gallery wall.
+    stored = page.evaluate(
+        "() => JSON.parse(localStorage.getItem('hh-gallery-v1') || '[]')"
+    )
+    assert len(stored) == 1, f"expected 1 gallery entry, found {len(stored)}"
+    assert stored[0]["thumb"].startswith("data:image/jpeg"), "thumbnail malformed"
+    assert stored[0]["meta"]["strokes"] > 0, "gallery meta missing strokes"
+    page.click("button[aria-label='Open gallery']")
+    page.wait_for_selector("h2:has-text('Gallery')", timeout=5000)
+    page.screenshot(path="e2e_6_gallery.png")
+    page.click("button[aria-label='Close gallery']")
+    page.wait_for_selector("h2", state="detached", timeout=5000)
     page.click("button[aria-label^='Draw sample']")
     page.wait_for_selector("h1", state="detached", timeout=30000)
     time.sleep(3)

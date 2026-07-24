@@ -25,6 +25,12 @@ const WM_INK = 'rgba(30, 58, 95, 0.45)'; // ink-blue @ 45%
 const PNG_MAX = 1600;   // long-side cap for the still image
 const VIDEO_MAX = 960;  // long-side cap for the recording (keeps encoding light)
 const VIDEO_FPS = 24;
+// GIF export (Feature 2.2): ~10fps at 480px wide, tapped from the SAME
+// compositing canvas as the video (so watermark + splash + ink match
+// exactly) and encoded incrementally in a Web Worker (gifenc) — no frame
+// ring buffer, flat memory for arbitrarily long draws.
+const GIF_WIDTH = 480;
+const GIF_DELAY_MS = 100; // 10 fps
 
 // MP4 (H.264 + AAC) FIRST: it's the only container iPhones play everywhere
 // (Photos, iMessage, AirDrop) — .webm files shared to an iPhone often won't
@@ -65,7 +71,9 @@ export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, pa
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const rafRef = useRef(0);
+  const gifWorkerRef = useRef(null);
   const [video, setVideo] = useState(null); // { url, ext } | null
+  const [gif, setGif] = useState(null);     // { url } | null
 
   const mime = useMemo(pickMime, []);
   const recSupported = useMemo(
@@ -131,6 +139,7 @@ export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, pa
     const el = canvasElRef.current;
     if (!el || !el.width || !el.height) return;
     setVideo((v) => { if (v?.url) URL.revokeObjectURL(v.url); return null; });
+    setGif((g) => { if (g?.url) URL.revokeObjectURL(g.url); return null; });
 
     const scale = Math.min(1, VIDEO_MAX / Math.max(el.width, el.height));
     const w = Math.max(2, Math.round(el.width * scale));
@@ -141,8 +150,57 @@ export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, pa
     const ctx = comp.getContext('2d');
     const splashImg = await rasterizeSplash(w, h);
 
+    // --- GIF side-channel: small canvas + worker; absent Worker support or a
+    // worker error simply means no GIF (button stays hidden) — video is never
+    // affected.
+    let gifCtx = null;
+    let gw = 0;
+    let gh = 0;
+    let lastGifTs = 0;
+    if (typeof Worker !== 'undefined') {
+      try {
+        const worker = new Worker(
+          new URL('../workers/gifWorker.js', import.meta.url),
+          { type: 'module' }
+        );
+        gw = Math.min(GIF_WIDTH, w);
+        gh = Math.max(2, Math.round((h / w) * gw));
+        const gc = document.createElement('canvas');
+        gc.width = gw;
+        gc.height = gh;
+        gifCtx = gc.getContext('2d', { willReadFrequently: true });
+        worker.onmessage = (e) => {
+          const msg = e.data || {};
+          if (msg.type === 'done') {
+            const blob = new Blob([msg.buffer], { type: 'image/gif' });
+            setGif({ url: URL.createObjectURL(blob) });
+            worker.terminate();
+            if (gifWorkerRef.current === worker) gifWorkerRef.current = null;
+          } else if (msg.type === 'error') {
+            worker.terminate();
+            if (gifWorkerRef.current === worker) gifWorkerRef.current = null;
+          }
+        };
+        worker.postMessage({ type: 'init', width: gw, height: gh, delayMs: GIF_DELAY_MS });
+        gifWorkerRef.current = worker;
+      } catch { gifCtx = null; }
+    }
+
     const loop = () => {
       composite(ctx, w, h, splashImg);
+      // Throttled GIF frame tap (transferable — the buffer moves, no copy).
+      const worker = gifWorkerRef.current;
+      if (worker && gifCtx) {
+        const now = performance.now();
+        if (now - lastGifTs >= GIF_DELAY_MS) {
+          lastGifTs = now;
+          try {
+            gifCtx.drawImage(comp, 0, 0, gw, gh);
+            const d = gifCtx.getImageData(0, 0, gw, gh);
+            worker.postMessage({ type: 'frame', buffer: d.data.buffer }, [d.data.buffer]);
+          } catch { /* skip the frame */ }
+        }
+      }
       rafRef.current = requestAnimationFrame(loop);
     };
     loop();
@@ -161,6 +219,8 @@ export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, pa
       recorder = new MediaRecorder(stream, { mimeType: mime });
     } catch {
       cancelAnimationFrame(rafRef.current);
+      try { gifWorkerRef.current?.terminate(); } catch { /* noop */ }
+      gifWorkerRef.current = null;
       return;
     }
     chunksRef.current = [];
@@ -169,6 +229,8 @@ export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, pa
     };
     recorder.onstop = () => {
       cancelAnimationFrame(rafRef.current);
+      // Finalize the GIF alongside the video (worker replies with the bytes).
+      try { gifWorkerRef.current?.postMessage({ type: 'finish' }); } catch { /* noop */ }
       // Trust the recorder's ACTUAL mimeType (browsers may normalize the
       // requested one) so the blob type and file extension always match
       // the real container.
@@ -208,9 +270,11 @@ export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, pa
       cancelAnimationFrame(rafRef.current);
       const r = recorderRef.current;
       if (r && r.state !== 'inactive') { try { r.stop(); } catch { /* noop */ } }
+      try { gifWorkerRef.current?.terminate(); } catch { /* noop */ }
+      gifWorkerRef.current = null;
     },
     []
   );
 
-  return { start, stop, snapshotPNG, video, recSupported };
+  return { start, stop, snapshotPNG, video, gif, recSupported };
 }

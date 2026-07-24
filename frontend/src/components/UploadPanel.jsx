@@ -53,6 +53,7 @@ const styles = {
 export default function UploadPanel({
   phase, error, onImage, onReset,
   onDownloadImage, onShare, shareSupported, videoUrl, videoExt = 'webm',
+  gifUrl = null, galleryCount = 0, onOpenGallery = null,
 }) {
   const fileRef = useRef(null);
   const videoRef = useRef(null);
@@ -123,6 +124,12 @@ export default function UploadPanel({
             <button style={styles.compact}>Save video ↓</button>
           </a>
         )}
+        {gifUrl && (
+          <a href={gifUrl} download="hypnotic-hand.gif"
+             style={{ textDecoration: 'none' }}>
+            <button style={styles.compact}>Save GIF ↓</button>
+          </a>
+        )}
         {shareSupported && (
           <button style={styles.compact} onClick={onShare}>Share ↗</button>
         )}
@@ -133,6 +140,17 @@ export default function UploadPanel({
 
   return (
     <div style={styles.overlay}>
+      {galleryCount > 0 && onOpenGallery && (
+        <div style={styles.corner}>
+          <button
+            style={styles.compact}
+            onClick={onOpenGallery}
+            aria-label="Open gallery"
+          >
+            Gallery · {galleryCount}
+          </button>
+        </div>
+      )}
       <h1 style={styles.title}>Hypnotic Hand</h1>
       <p style={styles.sub}>
         Upload a photo — a hand will draw it as one continuous line.

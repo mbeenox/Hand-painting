@@ -186,6 +186,33 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Phase 2 — "Return visits" (2026-07-24)** — both M features from
+  `docs/PLAN.md`:
+  (a) **Gallery wall (2.1)** — every finished drawing saves a ≤256px JPEG
+  thumbnail (dataURL, ~30–50 KB) + `{date, mode, detail, instrument,
+  seconds, strokes}` to `localStorage["hh-gallery-v1"]` (newest-first, FIFO
+  cap 24 ≈ 1.5 MB; every touch in try/catch). New `hooks/useGallery.js` +
+  `components/GalleryWall.jsx` (grid overlay → large view with Save
+  image / Delete; Clear-all with confirm). Idle screen shows "Gallery · N"
+  top-right once N > 0. Save guarded per runId so re-renders can't
+  double-add. Thumbnails only, nothing leaves the device.
+  (b) **GIF export (2.2)** — `useDrawCapture.start()` taps the SAME
+  compositing canvas as the video every ≥100 ms into a 480px canvas
+  (`willReadFrequently`), posts each RGBA buffer (transferable) to
+  `workers/gifWorker.js`, which palettizes (gifenc, 128 colours quantized
+  from frame 1 — paper+splash are laid down before the pen moves, so the
+  palette is stable) and appends incrementally — flat memory, encoder never
+  on the main thread. Finalized in `recorder.onstop` → "Save GIF ↓" beside
+  Save video. Measured: 33s draw → 4.6 MB looping GIF89a (spec ≤15 MB ✓),
+  watermark carried (same composite). No Worker / worker error → button
+  simply never appears; video unaffected. +`gifenc` dep; worker is its own
+  lazy chunk (nothing new on the first-paint critical path).
+  E2E: GIF89a header + NETSCAPE2.0 loop + size assertions; gallery entry
+  count/thumb/meta asserted post-draw; gallery overlay opened, shot, closed.
+  Gotcha found: Vite dev re-optimizing a NEWLY installed dep mid-run
+  reloads the page and kills a draw — first E2E after `npm install <dep>`
+  may need one warm-up run.
+
 - **Phase 1 — "Complete the loop" (2026-07-24)** — three S features from
   `docs/PLAN.md`, shipped together:
   (a) **Try-a-sample (1.1)** — two license-safe portraits bundled in
