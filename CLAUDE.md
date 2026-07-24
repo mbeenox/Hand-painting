@@ -189,6 +189,38 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Camera upgrades: back-camera flip + face focus (2026-07-24)** —
+  (a) **Flip.** `UploadPanel` camera gains facing state ('user'/'environment')
+  and a Flip button shown ONLY when `enumerateDevices` reports >1 videoinput
+  (checked right after permission grant, when labels are real). facingMode
+  is passed as a preference (single-camera laptops keep working). Selfie
+  PREVIEW mirrors (scaleX(-1)) like every camera app; the saved snap stays
+  un-mirrored.
+  (b) **Face focus.** Camera snaps call the backend with `focus=face`:
+  `face_focus()` (both backends, lockstep) detects frontal faces (Haar,
+  minNeighbors 6, minSize 10% of short side), builds a feathered keep-mask —
+  HEAD ellipse (1.6×/2.1× the Haar box: hair + chin ARE the portrait) plus a
+  BUST ellipse below (a portrait is head AND shoulders, not a floating
+  head) — then composites a portrait-mode background (Gaussian σ≈0.8% of
+  long side + 18% contrast fade toward grey) outside the mask BEFORE edge
+  detection. CRITICAL SECOND STEP: `edges[mask < 0.22] = 0` after Canny —
+  the gradient-percentile thresholds adapt to the mostly-blurred image and
+  RE-SENSITIZE, so blur alone leaks ghost blobs into the trace.
+  No face → clean no-op. Response gains `facesFocused`.
+  **Deploy detail:** the cascade XML (~0.9 MB) is BUNDLED AT `api/
+  haarcascade_frontalface_default.xml` because Vercel's excludeFiles strips
+  `**/cv2/data/**` — `cv2.data.haarcascades` is EMPTY in production; never
+  load from it in `api/index.py`. `backend/main.py` prefers the repo copy,
+  falls back to cv2.data locally.
+  Measured on the astronaut sample (busy flag background): face-region
+  share of output points 17.5% → 61.6% at the same point budget; rendered
+  side-by-side confirms rich face + kept shoulders + flag as whispers.
+  E2E: getUserMedia mocked with a canvas stream OF THE ASTRONAUT (this
+  Chromium registers no fake devices — --use-fake-device-for-media-capture
+  is a no-op here), so the test exercises REAL face detection: Flip button
+  appears (2 mock cams) and works, snap URL carries focus=face, response
+  asserts facesFocused == 1, drawing starts.
+
 - **Paper stocks: canvas colour done the printmaker's way (2026-07-24)** —
   `lib/papers.js` defines four curated PAPER STOCKS instead of a free
   colour picker (mid-value paper + mid-value ink = mud; value contrast is

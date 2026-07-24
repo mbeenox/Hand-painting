@@ -37,7 +37,7 @@ async function downscaleImage(fileOrBlob) {
   }
 }
 
-export async function processImage(fileOrBlob, detail = 'std', mode = 'trace') {
+export async function processImage(fileOrBlob, detail = 'std', mode = 'trace', focus = 'none') {
   const upload = await downscaleImage(fileOrBlob);
   const form = new FormData();
   // Field name MUST be "file" to match the FastAPI parameter.
@@ -47,6 +47,9 @@ export async function processImage(fileOrBlob, detail = 'std', mode = 'trace') {
   const params = new URLSearchParams();
   if (detail && detail !== 'std') params.set('detail', detail);
   if (mode && mode !== 'trace') params.set('mode', mode);
+  // focus=face (camera snaps): the backend blurs the background behind
+  // detected faces so the stroke budget concentrates on the subject.
+  if (focus && focus !== 'none') params.set('focus', focus);
   const q = params.toString();
   const qs = q ? `?${q}` : '';
   const res = await fetch(`${API_BASE}/process-image${qs}`, {

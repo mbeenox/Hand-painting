@@ -82,6 +82,80 @@ TRACE_CHAIKIN_ROUNDS = 2   # per-chain corner softening (lighter than TSP's 3)
 # ==========================================================================
 # Step A — Edge detection (identical to backend/main.py)
 # ==========================================================================
+# ---------------------------------------------------------------------------
+# Face focus (camera feature, 2026-07-24). Busy backgrounds steal the stroke
+# budget from the subject: every strong background edge becomes chains that
+# compete with the face for max_strokes and output_points. When the client
+# asks for focus=face (the in-app camera does), we detect frontal faces and
+# BLUR everything outside a feathered face mask BEFORE edge detection — the
+# optical equivalent of shooting portrait-mode: background edges melt away,
+# the trace budget flows to the face. No face found → complete no-op.
+#
+# The cascade ships IN THIS DIRECTORY: Vercel's excludeFiles strips
+# **/cv2/data/** to stay under the function size cap, so cv2.data.haarcascades
+# is EMPTY in production. Never load from cv2.data here.
+# ---------------------------------------------------------------------------
+_CASCADE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "haarcascade_frontalface_default.xml")
+_FACE_CASCADE = None
+
+
+def _get_face_cascade():
+    global _FACE_CASCADE
+    if _FACE_CASCADE is None:
+        c = cv2.CascadeClassifier(_CASCADE_PATH)
+        _FACE_CASCADE = c if not c.empty() else False
+    return _FACE_CASCADE or None
+
+
+def face_focus(img_bgr: np.ndarray):
+    """Blur the background behind detected faces.
+    Returns (image, n_faces, keep_mask | None). The mask is ALSO used to
+    hard-gate edges after Canny: gradient-percentile thresholds adapt to the
+    (now mostly-blurred) image and re-sensitize, so blur remnants alone still
+    leak ghost blobs into the trace."""
+    cascade = _get_face_cascade()
+    if cascade is None:
+        return img_bgr, 0, None
+    h, w = img_bgr.shape[:2]
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.equalizeHist(gray)
+    min_side = max(48, int(min(h, w) * 0.10))  # ignore speck-sized detections
+    faces = cascade.detectMultiScale(
+        gray, scaleFactor=1.1, minNeighbors=6, minSize=(min_side, min_side)
+    )
+    if len(faces) == 0:
+        return img_bgr, 0, None
+
+    # Feathered keep-mask: an ellipse per face, expanded well past the Haar
+    # box (which crops at the hairline and chin — hair and jaw ARE the
+    # portrait), then a wide Gaussian feather so the blur ramps in gently
+    # instead of cutting a halo.
+    mask = np.zeros((h, w), dtype=np.float32)
+    for (x, y, fw, fh) in faces:
+        cx, cy = x + fw / 2.0, y + fh / 2.0
+        # Head ellipse: 1.6x box width, 2.1x box height (hair above, chin below)
+        cv2.ellipse(mask, (int(cx), int(cy - fh * 0.05)),
+                    (int(fw * 0.80), int(fh * 1.05)), 0, 0, 360, 1.0, -1)
+        # Bust ellipse: a portrait is head AND shoulders, not a floating
+        # head — keep a classic bust-shaped region below the face.
+        cv2.ellipse(mask, (int(cx), int(cy + fh * 1.9)),
+                    (int(fw * 1.9), int(fh * 1.3)), 0, 0, 360, 1.0, -1)
+    feather = int(max(h, w) * 0.06) | 1
+    mask = cv2.GaussianBlur(mask, (feather, feather), 0)
+
+    # Portrait-mode background: strong blur + slight contrast fade so even
+    # high-contrast background edges drop below the Canny thresholds.
+    sigma = max(h, w) * 0.008
+    blurred = cv2.GaussianBlur(img_bgr, (0, 0), sigma)
+    blurred = cv2.addWeighted(blurred, 0.82, np.full_like(blurred, 127), 0.18, 0)
+
+    m3 = mask[:, :, None]
+    out = (img_bgr.astype(np.float32) * m3 +
+           blurred.astype(np.float32) * (1.0 - m3))
+    return out.astype(np.uint8), int(len(faces)), mask
+
+
 def detect_edges(img_bgr: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
     # CLAHE FIRST so faint structure is amplified before smoothing can kill
@@ -422,7 +496,8 @@ def smooth_chains(chains: List[np.ndarray], total_points: int,
 # ==========================================================================
 # Endpoint — registered at both the Vercel path and the bare path
 # ==========================================================================
-async def _process(file: UploadFile, detail: str = "std", mode: str = "trace"):
+async def _process(file: UploadFile, detail: str = "std", mode: str = "trace",
+                   focus: str = "none"):
     t_start = time.perf_counter()
     raw = await file.read()
     if not raw:
@@ -446,7 +521,17 @@ async def _process(file: UploadFile, detail: str = "std", mode: str = "trace"):
 
     rng = np.random.default_rng(int.from_bytes(os.urandom(8), "little"))
 
+    # Optional face focus (the in-app camera sends focus=face): blur the
+    # background behind detected faces so the stroke budget goes to the
+    # subject. Silently a no-op when no face is found.
+    n_faces = 0
+    face_mask = None
+    if focus == "face":
+        img, n_faces, face_mask = face_focus(img)
+
     edges = detect_edges(img)                                  # A
+    if face_mask is not None:
+        edges[face_mask < 0.22] = 0  # kill ghost edges from blur remnants
     breaks = [0]
 
     if mode == "trace":
@@ -495,19 +580,22 @@ async def _process(file: UploadFile, detail: str = "std", mode: str = "trace"):
         "numSampled": num_sampled,
         "pathLength": round(length, 4),
         "processingSeconds": round(elapsed, 3),
+        "facesFocused": n_faces,
     }
 
 
 @app.post("/api/process-image")   # path seen when deployed on Vercel
 async def process_image_vercel(file: UploadFile = File(...),
-                               detail: str = "std", mode: str = "trace"):
-    return await _process(file, detail, mode)
+                               detail: str = "std", mode: str = "trace",
+                               focus: str = "none"):
+    return await _process(file, detail, mode, focus)
 
 
 @app.post("/process-image")       # path seen under bare local uvicorn
 async def process_image_local(file: UploadFile = File(...),
-                              detail: str = "std", mode: str = "trace"):
-    return await _process(file, detail, mode)
+                              detail: str = "std", mode: str = "trace",
+                              focus: str = "none"):
+    return await _process(file, detail, mode, focus)
 
 
 BUILD_MARKER = "2026-07-23-r4-edges"  # bumped per deploy to verify rollouts

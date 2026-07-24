@@ -5,8 +5,31 @@ from playwright.sync_api import sync_playwright
 errors = []
 with sync_playwright() as p:
     browser = p.chromium.launch()
-    page = browser.new_page(viewport={"width": 1280, "height": 800},
-                            accept_downloads=True)
+    context = browser.new_context(viewport={"width": 1280, "height": 800},
+                                  accept_downloads=True,
+                                  permissions=["camera"])
+    # Mock camera: this Chromium build registers no fake devices, so feed
+    # getUserMedia a canvas stream of the ASTRONAUT sample — which also
+    # exercises REAL face detection on the snap (focus=face end-to-end).
+    # Two fake videoinputs → the Flip button must appear.
+    context.add_init_script("""
+      navigator.mediaDevices.getUserMedia = async () => {
+        const img = new Image();
+        img.src = '/samples/astronaut.jpg';
+        await img.decode();
+        const cv = document.createElement('canvas');
+        cv.width = img.width; cv.height = img.height;
+        const ctx = cv.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        setInterval(() => ctx.drawImage(img, 0, 0), 100);
+        return cv.captureStream(10);
+      };
+      navigator.mediaDevices.enumerateDevices = async () => [
+        {kind: 'videoinput', deviceId: 'front', label: 'Front'},
+        {kind: 'videoinput', deviceId: 'back', label: 'Back'},
+      ];
+    """)
+    page = context.new_page()
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(str(e)))
 
@@ -20,6 +43,29 @@ with sync_playwright() as p:
     # Sound is ON by default now — the toggle must already read "Mute".
     assert page.query_selector("button[aria-label='Mute sound']"), \
         "sound should be ON by default"
+
+    # --- Camera flow (mocked device): open camera → Flip must appear (two
+    # cameras enumerated) and work → Snap must send focus=face, the backend
+    # must actually FIND the astronaut's face, and a live drawing follows.
+    page.click("text=Use camera")
+    page.wait_for_selector("video", timeout=10000)
+    time.sleep(1)  # let the mock stream produce frames
+    flip = page.wait_for_selector("button[aria-label^='Switch to']", timeout=5000)
+    flip.click()  # front → back (mock just returns a new stream)
+    time.sleep(0.5)
+    with page.expect_response(lambda r: "process-image" in r.url,
+                              timeout=30000) as resp_info:
+        page.click("text=Snap 📸")
+    resp = resp_info.value
+    assert "focus=face" in resp.url, f"snap did not request face focus: {resp.url}"
+    body = resp.json()
+    assert body.get("facesFocused") == 1, \
+        f"backend should focus exactly 1 face, got {body.get('facesFocused')}"
+    page.wait_for_selector("h1", state="detached", timeout=30000)
+    time.sleep(2)
+    page.screenshot(path="e2e_0_camera_draw.png")
+    # Fresh page for the main flow (the camera draw would otherwise run on).
+    page.goto("http://localhost:5173", wait_until="networkidle")
 
     # Feature 3.1: draw in a NON-default mood so the mood-parameterized
     # drone/scale/chime paths run (Dusk = A minor pentatonic, darker bow).

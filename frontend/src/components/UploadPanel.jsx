@@ -66,6 +66,8 @@ export default function UploadPanel({
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const [cameraOn, setCameraOn] = useState(false);
+  const [facing, setFacing] = useState('user'); // 'user' (selfie) | 'environment' (back)
+  const [canFlip, setCanFlip] = useState(false); // more than one camera present
 
   const pickFile = () => fileRef.current?.click();
 
@@ -91,21 +93,45 @@ export default function UploadPanel({
     setCameraOn(false);
   }, []);
 
+  // Open (or re-open) the camera with the given facing. facingMode is a
+  // PREFERENCE, not exact — single-camera laptops just get their one camera.
+  const openStream = useCallback(async (face) => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: face, width: { ideal: 1280 } },
+    });
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = stream;
+    setCameraOn(true);
+    // let React mount the <video> first
+    requestAnimationFrame(() => {
+      if (videoRef.current) videoRef.current.srcObject = stream;
+    });
+  }, []);
+
   const startCamera = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 1280 } },
-      });
-      streamRef.current = stream;
-      setCameraOn(true);
-      // let React mount the <video> first
-      requestAnimationFrame(() => {
-        if (videoRef.current) videoRef.current.srcObject = stream;
-      });
+      await openStream(facing);
+      // Only offer the flip button when a second camera actually exists.
+      // enumerateDevices gives full info only after permission was granted,
+      // which it just was.
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        setCanFlip(devices.filter((d) => d.kind === 'videoinput').length > 1);
+      } catch { setCanFlip(false); }
     } catch {
       alert && console.warn('Camera unavailable or permission denied.');
     }
-  }, []);
+  }, [openStream, facing]);
+
+  const flipCamera = useCallback(async () => {
+    const next = facing === 'user' ? 'environment' : 'user';
+    try {
+      await openStream(next);
+      setFacing(next);
+    } catch {
+      console.warn('Could not switch camera.');
+    }
+  }, [facing, openStream]);
 
   const snap = useCallback(() => {
     const video = videoRef.current;
@@ -115,8 +141,11 @@ export default function UploadPanel({
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
     stopCamera();
-    // toBlob → binary PNG buffer, same multipart pipeline as file upload
-    canvas.toBlob((blob) => blob && onImage(blob), 'image/png', 0.95);
+    // toBlob → binary PNG buffer, same multipart pipeline as file upload.
+    // Camera shots ask the backend for FACE FOCUS: detected faces keep full
+    // detail while the (usually busy) background is blurred away, so the
+    // stroke budget goes to the portrait, not the bookshelf behind it.
+    canvas.toBlob((blob) => blob && onImage(blob, { focus: 'face' }), 'image/png', 0.95);
   }, [onImage, stopCamera]);
 
   if (phase === 'drawing') return null; // stay out of the way while drawing
@@ -174,9 +203,28 @@ export default function UploadPanel({
         </div>
       ) : cameraOn ? (
         <>
-          <video ref={videoRef} autoPlay playsInline muted style={styles.video} />
+          {/* Selfie previews mirror (like every camera app); the saved
+              snap stays un-mirrored. Back camera shows as-is. */}
+          <video
+            ref={videoRef} autoPlay playsInline muted
+            style={facing === 'user'
+              ? { ...styles.video, transform: 'scaleX(-1)' }
+              : styles.video}
+          />
           <div style={{ display: 'flex', gap: 12 }}>
             <button style={styles.button} onClick={snap}>Snap 📸</button>
+            {canFlip && (
+              <button
+                style={styles.button}
+                onClick={flipCamera}
+                aria-label={facing === 'user'
+                  ? 'Switch to back camera' : 'Switch to front camera'}
+                title={facing === 'user'
+                  ? 'Switch to back camera' : 'Switch to front camera'}
+              >
+                Flip 🔄
+              </button>
+            )}
             <button style={styles.button} onClick={stopCamera}>Cancel</button>
           </div>
         </>

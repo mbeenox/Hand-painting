@@ -159,7 +159,7 @@ export default function App() {
     [noteOn]
   );
 
-  const handleImage = useCallback(async (fileOrBlob) => {
+  const handleImage = useCallback(async (fileOrBlob, opts = {}) => {
     setError(null);
     setStillBlob(null);
     // This runs inside the upload/sample/camera CLICK — the user gesture that
@@ -168,7 +168,8 @@ export default function App() {
     setPhase('processing');
     try {
       const data = await processImage(
-        fileOrBlob, settingsRef.current.detail, settingsRef.current.mode
+        fileOrBlob, settingsRef.current.detail, settingsRef.current.mode,
+        opts.focus ?? 'none'
       );
       setPathData(data);
       setRunId((n) => n + 1);
