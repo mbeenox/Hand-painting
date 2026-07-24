@@ -21,11 +21,17 @@ const PNG_MAX = 1600;   // long-side cap for the still image
 const VIDEO_MAX = 960;  // long-side cap for the recording (keeps encoding light)
 const VIDEO_FPS = 24;
 
+// Audio-capable codec combos first: the recording carries the stroke-violin /
+// pen-scratch mix when sound is on. A video+opus mimeType with no live audio
+// yet is still fine — the track is attached at record start and simply
+// carries silence until the user enables sound.
 const VIDEO_MIMES = [
+  'video/webm;codecs=vp9,opus',
+  'video/webm;codecs=vp8,opus',
   'video/webm;codecs=vp9',
   'video/webm;codecs=vp8',
   'video/webm',
-  'video/mp4', // Safari records mp4/H.264 rather than webm
+  'video/mp4', // Safari records mp4/H.264+AAC rather than webm
 ];
 function pickMime() {
   if (typeof window === 'undefined' || !('MediaRecorder' in window)) return '';
@@ -36,7 +42,7 @@ function pickMime() {
   );
 }
 
-export function useDrawCapture(canvasElRef, splashRef, paper = PAPER) {
+export function useDrawCapture(canvasElRef, splashRef, getAudioStream = null, paper = PAPER) {
   const recorderRef = useRef(null);
   const chunksRef = useRef([]);
   const rafRef = useRef(0);
@@ -108,9 +114,18 @@ export function useDrawCapture(canvasElRef, splashRef, paper = PAPER) {
     };
     loop();
 
+    // Video from the compositing canvas + (when available) the Web Audio mix
+    // so the saved clip carries the stroke-violin performance. The audio
+    // track exists from record start; it is silent until sound is enabled.
+    const stream = comp.captureStream(VIDEO_FPS);
+    try {
+      const audio = typeof getAudioStream === 'function' ? getAudioStream() : null;
+      audio?.getAudioTracks().forEach((t) => stream.addTrack(t));
+    } catch { /* video-only recording is still fine */ }
+
     let recorder;
     try {
-      recorder = new MediaRecorder(comp.captureStream(VIDEO_FPS), { mimeType: mime });
+      recorder = new MediaRecorder(stream, { mimeType: mime });
     } catch {
       cancelAnimationFrame(rafRef.current);
       return;
@@ -128,7 +143,7 @@ export function useDrawCapture(canvasElRef, splashRef, paper = PAPER) {
     };
     recorderRef.current = recorder;
     recorder.start();
-  }, [recSupported, canvasElRef, rasterizeSplash, composite, mime]);
+  }, [recSupported, canvasElRef, rasterizeSplash, composite, mime, getAudioStream]);
 
   const stop = useCallback(() => {
     const r = recorderRef.current;

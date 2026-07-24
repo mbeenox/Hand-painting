@@ -186,6 +186,16 @@ Hard-won deployment facts (do **not** regress):
   `Scene.jsx` feeds it `speedRef`. Tuning constants (MIN_HALF/MAX_HALF/…) sit at
   the top of `InkTrail.jsx`; verified against a rendered preview of the exact math.
 
+- **Feature #6b — audio in the saved video (2026-07-23)** — `useDrawSound`
+  now routes every source through a master GainNode and exposes
+  `getAudioStream()` (a `MediaStreamDestination` tap of that bus);
+  `useDrawCapture.start()` adds its audio track to the canvas stream and the
+  mime list prefers `vp9,opus`/`vp8,opus` (Safari mp4 → AAC). The track is
+  attached at record start even with sound off — a context created without a
+  gesture stays suspended and records silence; the 🔊 tap (a gesture)
+  resumes it and the SAME track carries the mix mid-recording. E2E now
+  fetches the recorded blob and asserts an "OpusHead" init segment exists.
+
 - **Feature #6 — stroke violin: the drawing plays itself (2026-07-23)** —
   with sound on, every stroke is a bowed note: pen lands → note-on, lifts →
   release. What keeps random strokes musical: pitch = stroke height QUANTIZED

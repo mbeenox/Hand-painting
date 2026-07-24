@@ -76,11 +76,14 @@ export default function App() {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* ignore */ }
   }, [settings]);
 
-  const { start, stop, snapshotPNG, video, recSupported } = useDrawCapture(glElRef, splashRef);
   const {
     startScratch, stopScratch, startMusic, stopMusic,
-    noteOn, noteOff, chime, setSoundEnabled,
+    noteOn, noteOff, chime, setSoundEnabled, getAudioStream,
   } = useDrawSound(soundOnRef, speedRef, curveRef);
+  // Sound hook first: the capture takes its audio stream so the saved video
+  // carries the stroke-violin performance.
+  const { start, stop, snapshotPNG, video, recSupported } =
+    useDrawCapture(glElRef, splashRef, getAudioStream);
 
   const updateSettings = useCallback((patch) => setSettings((s) => ({ ...s, ...patch })), []);
 

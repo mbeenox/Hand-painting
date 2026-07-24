@@ -43,8 +43,10 @@ const SPEED_NORM = 25;    // world-units/sec that counts as "fast bowing"
 
 export function useDrawSound(enabledRef, speedRef, curveRef) {
   const ctxRef = useRef(null);
-  const nodesRef = useRef(null);   // scratch nodes
-  const musicRef = useRef(null);   // { drone, voices, current, lastOn }
+  const masterRef = useRef(null);    // one bus everything plays through
+  const mediaDestRef = useRef(null); // tap of that bus for video recording
+  const nodesRef = useRef(null);     // scratch nodes
+  const musicRef = useRef(null);     // { drone, voices, current, lastOn }
   const rafRef = useRef(0);
 
   const ensureCtx = useCallback(() => {
@@ -53,9 +55,34 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
       typeof window !== 'undefined' &&
       (window.AudioContext || window.webkitAudioContext);
     if (!AC) return null;
-    try { ctxRef.current = new AC(); } catch { return null; }
+    try {
+      ctxRef.current = new AC();
+      // Master bus: every source connects HERE (not to ctx.destination), so
+      // the same mix can be tapped by getAudioStream() for the recording.
+      masterRef.current = ctxRef.current.createGain();
+      masterRef.current.gain.value = 1;
+      masterRef.current.connect(ctxRef.current.destination);
+    } catch { return null; }
     return ctxRef.current;
   }, []);
+
+  /**
+   * Audio track for the video recording (useDrawCapture). Safe to call at
+   * record start even before any sound gesture: a context created here
+   * starts 'suspended' and yields a SILENT track; the moment the user taps
+   * 🔊 (a gesture) the context resumes and the same track carries the mix.
+   */
+  const getAudioStream = useCallback(() => {
+    const ctx = ensureCtx();
+    if (!ctx || typeof ctx.createMediaStreamDestination !== 'function') return null;
+    if (!mediaDestRef.current) {
+      try {
+        mediaDestRef.current = ctx.createMediaStreamDestination();
+        masterRef.current.connect(mediaDestRef.current);
+      } catch { return null; }
+    }
+    return mediaDestRef.current.stream;
+  }, [ensureCtx]);
 
   // ------------------------------------------------------------------
   // Pen scratch (unchanged behavior)
@@ -80,7 +107,7 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
     bandpass.Q.value = 0.8;
     const gain = ctx.createGain();
     gain.gain.value = 0;
-    noise.connect(bandpass).connect(gain).connect(ctx.destination);
+    noise.connect(bandpass).connect(gain).connect(masterRef.current);
     try { noise.start(); } catch { /* already started */ }
     nodesRef.current = { noise, bandpass, gain };
     return nodesRef.current;
@@ -173,7 +200,7 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
       o.start();
       return o;
     });
-    filter.connect(gain).connect(ctx.destination);
+    filter.connect(gain).connect(masterRef.current);
     try {
       gain.gain.setTargetAtTime(0.042, ctx.currentTime, 0.9); // slow swell in
     } catch { /* noop */ }
@@ -240,7 +267,7 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
     gain.gain.value = 0.0001;
     osc1.connect(filter);
     osc2.connect(filter);
-    filter.connect(gain).connect(ctx.destination);
+    filter.connect(gain).connect(masterRef.current);
     try {
       gain.gain.setValueAtTime(0.0001, now);
       gain.gain.setTargetAtTime(0.075, now, 0.06); // soft bow attack
@@ -285,7 +312,7 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
       g.gain.setValueAtTime(0.0001, t0);
       g.gain.linearRampToValueAtTime(0.14, t0 + 0.02);
       g.gain.exponentialRampToValueAtTime(0.0006, t0 + 1.3);
-      o.connect(g).connect(ctx.destination);
+      o.connect(g).connect(masterRef.current);
       o.start(t0);
       o.stop(t0 + 1.4);
     });
@@ -309,6 +336,6 @@ export function useDrawSound(enabledRef, speedRef, curveRef) {
 
   return {
     startScratch, stopScratch, startMusic, stopMusic,
-    noteOn, noteOff, chime, setSoundEnabled,
+    noteOn, noteOff, chime, setSoundEnabled, getAudioStream,
   };
 }
