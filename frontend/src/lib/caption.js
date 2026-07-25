@@ -191,5 +191,29 @@ export function appendCaption(data, glyphs, {
     aspect: boxW / totalH,
     pathLength: Math.round(pathLength * 10000) / 10000,
     caption: { dedication: ded, signature: sig, strokes: strokes.length },
+    // Where the PORTRAIT now sits inside the re-normalized frame — the
+    // caption band pushed it up and shrank it. Anything that has to line up
+    // with the drawing rather than the whole board (the ghost reveal) reads
+    // this instead of guessing from `aspect`.
+    drawingBox: {
+      x0: 0, y0: bandH * s, x1: boxW * s, y1: (boxH + bandH) * s,
+    },
+  };
+}
+
+/**
+ * The rectangle the DRAWING occupies in a pathData's normalized frame.
+ * Without a caption that is the whole declared box; with one it is the part
+ * above the writing. Always returns a box, so callers need no special case.
+ */
+export function drawingBox(data) {
+  const b = data?.drawingBox;
+  if (b && Number.isFinite(b.x0) && b.x1 > b.x0 && b.y1 > b.y0) return b;
+  const aspect = Number(data?.aspect) > 0 ? Number(data.aspect) : 1;
+  return {
+    x0: 0,
+    y0: 0,
+    x1: aspect >= 1 ? 1 : aspect,
+    y1: aspect >= 1 ? 1 / aspect : 1,
   };
 }

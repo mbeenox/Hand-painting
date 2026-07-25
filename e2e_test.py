@@ -110,9 +110,54 @@ with sync_playwright() as p:
     page.screenshot(path="e2e_2_drawing_3s.png")
     time.sleep(8)
     page.screenshot(path="e2e_3_drawing_11s.png")
-    # Adaptive duration (Feature 1.3): the synthetic test image's std-trace
-    # pathLength ≈ 52u → auto ≈ 33s (was a fixed 30s).
-    time.sleep(24)
+
+    # Adaptive duration (Feature 1.3) makes the length depend on the path, and
+    # the written caption (5.1) lengthens it further — so wait for the done
+    # bar rather than sleeping a guessed number of seconds.
+    page.wait_for_selector("text=Draw another ↺", timeout=120000)
+
+    # --- Feature 5.2 "Ghost reveal": the source photo breathes in under the
+    # finished ink and fades out again, all inside the 2.6s capture tail.
+    #
+    # Sampled IN THE PAGE rather than with page.screenshot(): a screenshot is
+    # a CDP round trip plus a 1280x800 PNG encode, which repeatedly took long
+    # enough to land after the ~2s reveal had already finished — the test
+    # missed a feature that was working. This reads the WebGL canvas every
+    # 80ms into an 80x50 scratch canvas and tracks MEAN ALPHA, which is the
+    # right signal twice over: it is cheap, and it measures the very buffer
+    # `useDrawCapture` composites, so a pass means the reveal is in the saved
+    # video and GIF too.
+    alpha = page.evaluate("""async () => {
+      const gl = document.querySelector('canvas');
+      const s = document.createElement('canvas'); s.width = 80; s.height = 50;
+      const ctx = s.getContext('2d', { willReadFrequently: true });
+      const sample = () => {
+        ctx.clearRect(0, 0, 80, 50);
+        ctx.drawImage(gl, 0, 0, 80, 50);
+        const d = ctx.getImageData(0, 0, 80, 50).data;
+        let a = 0;
+        for (let i = 3; i < d.length; i += 4) a += d[i];
+        return a / (80 * 50);
+      };
+      const out = [];
+      const t0 = performance.now();
+      while (performance.now() - t0 < 3600) {
+        out.push([Math.round(performance.now() - t0), Math.round(sample() * 10) / 10]);
+        await new Promise((r) => setTimeout(r, 80));
+      }
+      return out;
+    }""")
+    vals = [a for _, a in alpha]
+    settled = sum(vals[-6:]) / 6           # ink only, reveal finished
+    print(f"ghost alpha: peak {max(vals):.1f} → settled {settled:.1f} "
+          f"({len(alpha)} samples over 3.6s)")
+    assert max(vals) > settled * 1.25, \
+        f"no ghost reveal in the captured canvas: peak {max(vals)} vs {settled}"
+    # …and gone again before useDrawCapture grabs the clean still at 2.6s.
+    # A reveal that outlived its window would be baked into every saved PNG.
+    late = [a for t, a in alpha if t >= 2400]
+    assert late and max(late) <= settled * 1.05, \
+        f"ghost still showing at 2.4s — it would contaminate the still: {late[:4]}"
     page.screenshot(path="e2e_4_done.png")
 
     # Wait out the rest of the ~33s draw + the 2.6s post-done capture stop,
@@ -208,6 +253,27 @@ with sync_playwright() as p:
     assert gif_info["loops"], "GIF is missing its loop extension"
     assert gif_info["bytes"] > 100_000, "GIF suspiciously small"
 
+    # --- Feature 5.2 "Instant replay": the SAME path at 4x. It must not
+    # re-arm the recorder or clobber the video/GIF that were already made,
+    # and it must not add a second gallery entry for one drawing.
+    gallery_before = page.evaluate(
+        "() => JSON.parse(localStorage.getItem('hh-gallery-v1') || '[]').length"
+    )
+    video_href_before = page.get_attribute("a[download^='hypnotic-hand.']", "href")
+    t_replay = time.time()
+    page.click("text=Replay ⏩")
+    page.wait_for_selector("text=Replaying…", timeout=5000)
+    page.wait_for_selector("text=Replay ⏩", timeout=40000)  # finished
+    replay_s = time.time() - t_replay
+    print(f"replay took {replay_s:.1f}s (full draw was ~33s)")
+    assert replay_s < 20, f"replay should be ~4x faster, took {replay_s:.1f}s"
+    assert page.get_attribute("a[download^='hypnotic-hand.']", "href") == video_href_before, \
+        "replay re-recorded the video!"
+    assert page.evaluate(
+        "() => JSON.parse(localStorage.getItem('hh-gallery-v1') || '[]').length"
+    ) == gallery_before, "replay added a spurious gallery entry"
+    page.screenshot(path="e2e_7_after_replay.png")
+
     # Feature 1.1 end-to-end: draw another → one click on a sample chip must
     # reach a live drawing (no upload dialog involved).
     page.click("text=Draw another ↺")
@@ -260,6 +326,42 @@ with sync_playwright() as p:
     page.wait_for_selector("h1", state="detached", timeout=30000)
     time.sleep(3)
     page.screenshot(path="e2e_5_sample_drawing.png")
+
+    # --- Feature 5.2 "Drag & drop" + "Redraw", run last so the gallery
+    # assertions above still see exactly one entry per drawing.
+    page.wait_for_selector("text=Draw another \u21ba", timeout=90000)
+    page.click("text=Draw another \u21ba")
+    page.wait_for_selector("button[aria-label^='Draw sample']", timeout=10000)
+
+    # A photo dropped on the idle overlay goes through the same onImage path
+    # as an upload. Playwright has no real drag source, so build a
+    # DataTransfer from the bundled sample and dispatch what a browser would.
+    page.evaluate("""async () => {
+      const blob = await (await fetch('/samples/astronaut.jpg')).blob();
+      const file = new File([blob], 'dropped.jpg', { type: 'image/jpeg' });
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      const zone = document.querySelector('h1').parentElement;
+      for (const type of ['dragenter', 'dragover', 'drop']) {
+        zone.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true }));
+      }
+    }""")
+    page.wait_for_selector("h1", state="detached", timeout=30000)
+    print("drag & drop reached a drawing")
+    time.sleep(2)
+    page.screenshot(path="e2e_8_dropped.png")
+    page.wait_for_selector("text=Draw another \u21ba", timeout=120000)
+
+    # Redraw: the SAME photo through the WHOLE pipeline again — it must hit
+    # the backend (that is what makes it a new drawing, not a replay).
+    with page.expect_response(lambda r: "process-image" in r.url,
+                              timeout=30000) as redraw_resp:
+        page.click("text=Redraw \u21bb")
+    assert redraw_resp.value.ok, "redraw did not re-run the pipeline"
+    page.wait_for_selector("h1", state="detached", timeout=30000)
+    print("redraw re-ran the backend and started a fresh drawing")
+    time.sleep(2)
+    page.screenshot(path="e2e_9_redraw.png")
 
     browser.close()
 

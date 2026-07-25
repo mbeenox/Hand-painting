@@ -49,6 +49,12 @@ const SETTINGS_KEY = 'hh-settings-v1';
 // dense ones shouldn't feel rushed. 1.6 normalized-units/second matches the
 // comfortable hand pace of the old fixed default (~47u over 30s); clamp keeps
 // pathological inputs (near-blank photos, ultra-dense scribbles) watchable.
+// Instant replay (Feature 5.2): the SAME path and timetable, run fast. Not a
+// new drawing — no backend call, no new stroke order, no new melody, and
+// nothing re-recorded. Just the pleasure of watching it happen again.
+const REPLAY_SPEED = 4;
+const REPLAY_MIN_S = 4;
+
 const AUTO_PACE_UPS = 1.6; // path units per second
 const AUTO_MIN_S = 20;
 const AUTO_MAX_S = 58; // raised from 42 for the 200%-completeness ceiling —
@@ -147,8 +153,17 @@ export default function App() {
   // so it survives "draw another" but never the tab. (The "Sign & date"
   // option IS a lasting preference, so that one lives in settings.)
   const [dedication, setDedication] = useState('');
+  // Feature 5.2. `replaying` re-runs the finished path fast; `sourceUrl` is
+  // the uploaded photo, kept alive for the ghost reveal and revoked the
+  // moment it is replaced.
+  const [replaying, setReplaying] = useState(false);
+  const [replayId, setReplayId] = useState(0);
+  const [sourceUrl, setSourceUrl] = useState(null);
 
   const glElRef = useRef(null);
+  const sourceRef = useRef(null);    // { blob, opts } → Redraw
+  const sourceUrlRef = useRef(null); // the live object URL (ownership)
+  const replayingRef = useRef(false);
   const splashRef = useRef(null);
   const speedRef = useRef(0);
   const curveRef = useRef(0);
@@ -156,6 +171,11 @@ export default function App() {
   const settingsRef = useRef(settings);
   const dedicationRef = useRef('');
   useEffect(() => { dedicationRef.current = dedication; }, [dedication]);
+  useEffect(() => { replayingRef.current = replaying; }, [replaying]);
+  // Object URLs are a manual resource; release the last one on teardown.
+  useEffect(() => () => {
+    if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
+  }, []);
   useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => {
@@ -190,6 +210,19 @@ export default function App() {
   const handleImage = useCallback(async (fileOrBlob, opts = {}) => {
     setError(null);
     setStillBlob(null);
+    setReplaying(false);
+    // Hold on to the source (Feature 5.2): the blob so "Redraw" can run the
+    // whole pipeline again, and an object URL so the ghost reveal has a photo
+    // to show. Neither ever leaves the device.
+    sourceRef.current = { blob: fileOrBlob, opts };
+    if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
+    try {
+      sourceUrlRef.current = URL.createObjectURL(fileOrBlob);
+      setSourceUrl(sourceUrlRef.current);
+    } catch {
+      sourceUrlRef.current = null;
+      setSourceUrl(null); // no reveal; the drawing is unaffected
+    }
     // This runs inside the upload/sample/camera CLICK — the user gesture that
     // lets the (on-by-default) AudioContext start before the draw begins.
     if (soundOnRef.current) setSoundEnabled(true);
@@ -217,13 +250,38 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setSoundEnabled]);
 
-  const handleDrawingDone = useCallback(() => setPhase('done'), []);
+  // A replay ends by clearing `replaying`; a real draw ends by finishing.
+  // Read through a ref so this callback's identity stays stable — it is a
+  // dependency of the memoized <Canvas>.
+  const handleDrawingDone = useCallback(() => {
+    if (replayingRef.current) setReplaying(false);
+    else setPhase('done');
+  }, []);
+
+  // Watch it happen again, fast. Bumping replayId remounts the Canvas, which
+  // is what resets InkTrail's append-only buffer; pathData is untouched, so
+  // the strokes, their order and the melody are identical.
+  const replay = useCallback(() => {
+    if (!pathData || replayingRef.current) return;
+    replayingRef.current = true;
+    setReplaying(true);
+    setReplayId((n) => n + 1);
+  }, [pathData]);
+
+  // Same photo, whole pipeline again: new stroke order, new melody, new
+  // drawing. The app's thesis in one button.
+  const redraw = useCallback(() => {
+    const src = sourceRef.current;
+    if (src?.blob) handleImage(src.blob, src.opts);
+  }, [handleImage]);
+
   const reset = useCallback(() => {
     stop();
     stopScratch();
     stopMusic();
     setStillBlob(null);
     setPathData(null);
+    setReplaying(false);
     setPhase('idle');
   }, [stop, stopScratch, stopMusic]);
 
@@ -292,18 +350,28 @@ export default function App() {
   // --- sound: scratch + stroke violin while drawing (if enabled),
   //     chime on completion ---
   useEffect(() => {
-    if (phase === 'drawing' && soundOn) {
+    // A replay is a performance too — it plays the same melody, four times
+    // as fast (short strokes → the duet leans on the piano, so it reads as a
+    // music box being cranked rather than a violin sprint).
+    if ((phase === 'drawing' || replaying) && soundOn) {
       startScratch();
       startMusic();
     } else {
       stopScratch();
       stopMusic();
     }
-  }, [phase, soundOn, startScratch, stopScratch, startMusic, stopMusic]);
+  }, [phase, replaying, soundOn, startScratch, stopScratch, startMusic, stopMusic]);
 
   useEffect(() => {
     if (phase === 'done' && soundOn) chime();
   }, [phase, soundOn, chime]);
+
+  // …and a replay deserves the same closing chime, or the music just stops.
+  const wasReplaying = useRef(false);
+  useEffect(() => {
+    if (wasReplaying.current && !replaying && soundOn) chime();
+    wasReplaying.current = replaying;
+  }, [replaying, soundOn, chime]);
 
   const downloadImage = useCallback(async () => {
     const blob = stillBlob || (await snapshotPNG());
@@ -335,13 +403,16 @@ export default function App() {
   const showSplash = phase === 'drawing' || phase === 'done';
   // Auto mode paces the draw to the path the backend actually returned;
   // manual mode honours the slider. Evaluated per run (runId in the deps).
-  const drawSeconds = (settings.autoTime ?? true)
+  const fullSeconds = (settings.autoTime ?? true)
     ? autoDrawSeconds(pathData?.pathLength)
     : settings.seconds;
+  const drawSeconds = replaying
+    ? Math.max(REPLAY_MIN_S, fullSeconds / REPLAY_SPEED)
+    : fullSeconds;
   const canvas = useMemo(
     () => (
       <Canvas
-        key={runId}
+        key={`${runId}-${replayId}`}
         gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
         onCreated={({ gl }) => { glElRef.current = gl.domElement; }}
         camera={{ position: [0, 0, 11], fov: 40 }}
@@ -351,7 +422,7 @@ export default function App() {
           <Scene
             pathData={pathData}
             duration={drawSeconds}
-            active={phase === 'drawing'}
+            active={phase === 'drawing' || replaying}
             onComplete={handleDrawingDone}
             speedRef={speedRef}
             curveRef={curveRef}
@@ -359,12 +430,15 @@ export default function App() {
             onNoteOff={noteOff}
             inkColor={settings.inkColor}
             weight={settings.weight}
+            ghostUrl={sourceUrl}
+            ghostActive={phase === 'done' && !replaying}
           />
         )}
       </Canvas>
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [runId, pathData, phase, handleDrawingDone, settings.inkColor, settings.weight]
+    [runId, replayId, replaying, drawSeconds, pathData, phase, handleDrawingDone,
+     sourceUrl, settings.inkColor, settings.weight]
   );
 
   return (
@@ -419,6 +493,9 @@ export default function App() {
         signDate={settings.signDate ?? false}
         onSignDate={(v) => updateSettings({ signDate: v })}
         onCaptionIntent={loadHersheyFont}
+        onReplay={replay}
+        replaying={replaying}
+        onRedraw={redraw}
       />
       {galleryOpen && (
         <GalleryWall

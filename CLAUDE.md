@@ -149,6 +149,58 @@ Hard-won deployment facts (do **not** regress):
 
 ## Revision history
 
+- **Phase 5.2 — reveal, replay & friction (2026-07-25)** — the four small
+  items from `docs/PLAN.md`, shipped together.
+  (a) **Ghost reveal.** On `done` the SOURCE PHOTO breathes in under the ink,
+  holds, and fades — "look what it caught". Built as a textured plane INSIDE
+  the R3F scene (`components/GhostReveal.jsx`), not a DOM overlay, and that
+  choice does two jobs: registration is free (the plane sits at the drawing's
+  exact world rect via the same normalized→world map `usePathAnimation`
+  uses, so it lands under its own line art at any aspect ratio — including
+  the shrunken, pushed-up rect a written caption leaves), and every export
+  gets it free (`useDrawCapture` composites the WebGL canvas as one layer, so
+  it is in the video and GIF with zero compositing changes). z = 0.004, just
+  behind INK_Z; the hand still occludes it. `caption.js` now emits
+  `drawingBox` and exports `drawingBox(data)`, which falls back to the full
+  declared box when there is no caption.
+  **Two calibrations, both from looking at output:** 12% opacity (the
+  specced number) is INVISIBLE — a photo over pale paper only registers where
+  it is dark, so a light or low-contrast source shows nothing; 0.26 is where
+  the form reads without washing the paper out. And the cycle
+  (0.4s in / 1.0s hold / 0.7s out = 2.1s) is deliberately shorter than the
+  2.6s the capture keeps running after `done`, so the reveal is INSIDE the
+  recording and gone again before `snapshotPNG()` takes the clean still.
+  (b) **Instant replay.** "Replay ⏩" re-runs the identical pathData at 4×
+  (`REPLAY_SPEED`, floored at 4s). Bumping `replayId` — part of the Canvas
+  key — remounts the Canvas, which is what resets InkTrail's append-only
+  buffer; pathData is untouched, so strokes, order and melody are identical.
+  `phase` stays `'done'` throughout, which is what keeps the recorder from
+  re-arming, the gallery from double-saving (also guarded per runId) and the
+  video/GIF blobs intact. `active` and the music effect became
+  `phase === 'drawing' || replaying`; a replay gets its own closing chime.
+  Save-image is unaffected mid-replay because `downloadImage` prefers the
+  already-captured `stillBlob`.
+  (c) **Redraw.** The source blob + its opts are kept in a ref; "Redraw ↻"
+  re-runs the WHOLE pipeline → new stroke order, new melody, new drawing.
+  (d) **Drag & drop** on the idle overlay, feeding the existing onImage path.
+  The load-bearing part is the WINDOW-level `dragover`/`drop` preventDefault:
+  without it a photo dropped outside the dropzone makes the browser NAVIGATE
+  to it, discarding a drawing in progress. UploadPanel renders null while
+  drawing but stays mounted, so the guard covers every phase.
+  Source object URLs are owned explicitly (`sourceUrlRef`), revoked on
+  replace and on unmount.
+  **Testing lesson worth keeping:** the first ghost assertion used two
+  `page.screenshot()` calls around the reveal and kept reporting a diff of
+  exactly 0.0 — a CDP round trip plus a 1280×800 PNG encode repeatedly landed
+  AFTER the ~2s window, so the test failed a feature that was working (proved
+  by reading the canvas directly: mean alpha 42 vs 21). The E2E now samples
+  the WebGL canvas IN THE PAGE every ~80ms into an 80×50 scratch canvas and
+  tracks mean alpha — cheap, race-free, and it measures the very buffer the
+  exports composite, so a pass also means the reveal is in the video/GIF.
+  Verified: peak 39.5 vs settled 16.8, faded by 2.4s; replay 12.3s vs a ~42s
+  draw with the video href and gallery count unchanged; drag & drop and
+  redraw both reaching drawings; zero console errors.
+
 - **Phase 5.1 — "the hand writes": dedications & signature (2026-07-25)** —
   the app becomes a gift-maker: the pen that drew Mom also writes "Happy
   birthday, Mom" underneath, stroke by stroke, playing its notes, and every
@@ -644,3 +696,18 @@ Hard-won deployment facts (do **not** regress):
   is written in full at every Completeness setting. Empty dedication +
   signDate off must return the input pathData object UNCHANGED (identity),
   which is what keeps the ordinary path byte-identical.
+- The ghost reveal must FINISH inside the 2.6s post-`done` capture tail
+  (currently 2.1s). Longer and it bakes into the "clean still" that
+  `snapshotPNG()` grabs, and into every gallery thumbnail.
+- The ghost lives in the R3F scene, not the DOM. A DOM overlay would have to
+  re-derive the camera projection to stay registered with the drawing and
+  would need its own compositing pass in `useDrawCapture` to reach exports.
+- Replay must keep `phase === 'done'`. That single fact is what stops the
+  recorder re-arming, the gallery double-saving and the video/GIF blobs being
+  replaced; anything that routes a replay back through `'drawing'` breaks all
+  three at once.
+- Drag & drop needs the WINDOW-level `dragover`/`drop` preventDefault, or a
+  photo dropped outside the dropzone navigates the browser away mid-draw.
+- Don't assert on short-lived canvas animations with `page.screenshot()` —
+  the round trip plus PNG encode is slow enough to miss a 2s window. Sample
+  the canvas in-page instead (see the ghost check in `e2e_test.py`).

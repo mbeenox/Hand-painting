@@ -8,7 +8,7 @@
  * /samples/ and fed through the exact same onImage path as an upload, so a
  * cold visitor reaches a live drawing in one click.
  */
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 const SAMPLES = [
   { src: '/samples/astronaut.jpg', label: 'Astronaut' },
@@ -64,6 +64,13 @@ const styles = {
   },
 };
 
+// Drop target feedback: an inset dashed rule in the paper's own ink, so the
+// whole idle screen reads as the target without the layout moving a pixel.
+const dropOutline = (paper) => ({
+  outline: `3px dashed ${paper?.sub ?? '#5a5a6e'}`,
+  outlineOffset: -18,
+});
+
 // The hand writes the dedication in a single-stroke font in a band under the
 // drawing; past ~48 characters the lettering has to shrink far enough that
 // it stops reading as handwriting and starts reading as fine print.
@@ -75,6 +82,7 @@ export default function UploadPanel({
   gifUrl = null, galleryCount = 0, onOpenGallery = null, paper = null,
   dedication = '', onDedication = null, signDate = false, onSignDate = null,
   onCaptionIntent = null,
+  onReplay = null, replaying = false, onRedraw = null,
 }) {
   // Paper-stock tints: the idle screen should read as the same sheet of
   // paper the drawing will happen on, not a white app floating over it.
@@ -86,11 +94,36 @@ export default function UploadPanel({
   const fileRef = useRef(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const [dragging, setDragging] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [facing, setFacing] = useState('user'); // 'user' (selfie) | 'environment' (back)
   const [canFlip, setCanFlip] = useState(false); // more than one camera present
 
   const pickFile = () => fileRef.current?.click();
+
+  // Drag & drop (Feature 5.2). The window-level handlers are the important
+  // half: without them a photo dropped anywhere OUTSIDE the dropzone makes
+  // the browser NAVIGATE to it, throwing away the drawing in progress. This
+  // component renders null while drawing but stays mounted, so the guard
+  // covers every phase.
+  useEffect(() => {
+    const swallow = (e) => e.preventDefault();
+    window.addEventListener('dragover', swallow);
+    window.addEventListener('drop', swallow);
+    return () => {
+      window.removeEventListener('dragover', swallow);
+      window.removeEventListener('drop', swallow);
+    };
+  }, []);
+
+  const onDrop = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(false);
+    const file = Array.from(e.dataTransfer?.files ?? [])
+      .find((f) => f.type.startsWith('image/'));
+    if (file) onImage(file);
+  }, [onImage]);
 
   // Same-origin fetch → blob → the normal upload pipeline. No backend change.
   const pickSample = useCallback(async (src) => {
@@ -190,13 +223,46 @@ export default function UploadPanel({
         {shareSupported && (
           <button style={styles.compact} onClick={onShare}>Share ↗</button>
         )}
+        {/* Feature 5.2 — the two "again" buttons, next to each other on
+            purpose: Replay is the SAME drawing at 4×, Redraw is the same
+            photo drawn afresh (new strokes, new melody). */}
+        {onReplay && (
+          <button
+            style={replaying ? { ...styles.compact, opacity: 0.55, cursor: 'default' } : styles.compact}
+            onClick={onReplay}
+            disabled={replaying}
+            title="Watch this drawing again at 4× speed"
+          >
+            {replaying ? 'Replaying…' : 'Replay ⏩'}
+          </button>
+        )}
+        {onRedraw && (
+          <button
+            style={styles.compact}
+            onClick={onRedraw}
+            disabled={replaying}
+            title="Draw the same photo again — new strokes, new melody"
+          >
+            Redraw ↻
+          </button>
+        )}
         <button style={styles.compact} onClick={onReset}>Draw another ↺</button>
       </div>
     );
   }
 
   return (
-    <div style={overlayStyle}>
+    <div
+      style={dragging ? { ...overlayStyle, ...dropOutline(paper) } : overlayStyle}
+      onDragEnter={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+      onDragLeave={(e) => {
+        // Only clear when the pointer leaves the OVERLAY, not when it crosses
+        // one of the buttons inside it (which would flicker the highlight).
+        if (!e.currentTarget.contains(e.relatedTarget)) setDragging(false);
+      }}
+      onDrop={onDrop}
+    >
       {galleryCount > 0 && onOpenGallery && (
         <div style={styles.corner}>
           <button
@@ -210,7 +276,9 @@ export default function UploadPanel({
       )}
       <h1 style={titleStyle}>Hypnotic Hand</h1>
       <p style={subStyle}>
-        Upload a photo — a hand will draw it as one continuous line.
+        {dragging
+          ? 'Drop the photo anywhere on this page.'
+          : 'Upload a photo — a hand will draw it as one continuous line.'}
       </p>
       {error && <p style={styles.err}>⚠ {error}</p>}
 

@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path';
 import {
   parseJHF, fontMetrics, asciiFold, layoutBlock, densify, lineToStrokes, handwrite,
 } from '../src/lib/hershey.js';
-import { buildCaption, appendCaption, signatureText } from '../src/lib/caption.js';
+import { buildCaption, appendCaption, signatureText, drawingBox } from '../src/lib/caption.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const raw = readFileSync(join(here, '../src/lib/fonts/futural.jhf'), 'utf8');
@@ -191,6 +191,31 @@ check('caption sits strictly below the drawing',
 const share = (Math.max(...drawingYs) - Math.min(...drawingYs)) / bh;
 check('drawing gave up a sensible slice of the frame', share > 0.65 && share < 0.92,
   `portrait now fills ${(share * 100).toFixed(1)}% of the frame height`);
+
+// --- drawingBox: where the ghost reveal (5.2) must land -------------------
+// The reveal is a textured plane placed at this rectangle. If it drifts, the
+// photo stops registering with its own line art — or worse, covers the
+// writing. Both failures are silent, so they get asserted here.
+const plainBox = drawingBox(base);
+check('plain path: box is the whole declared frame',
+  plainBox.x0 === 0 && plainBox.y0 === 0
+  && near(plainBox.x1, 0.75, 1e-9) && near(plainBox.y1, 1, 1e-9),
+  JSON.stringify(plainBox));
+check('absent drawingBox falls back to aspect',
+  near(drawingBox({ aspect: 2 }).x1, 1) && near(drawingBox({ aspect: 2 }).y1, 0.5)
+  && near(drawingBox(undefined).x1, 1));
+
+const box = drawingBox(out);
+check('captioned: box hugs the drawing it describes',
+  near(box.y1, Math.max(...drawingYs), 1e-9)
+  && box.y0 <= Math.min(...drawingYs) + 1e-9
+  && box.x1 >= Math.max(...xs.slice(0, base.points.length)) - 1e-9,
+  `box y ${box.y0.toFixed(4)}..${box.y1.toFixed(4)}`);
+check('captioned: box clears the writing entirely',
+  box.y0 >= Math.max(...captionYs) - 1e-9,
+  `box bottom ${box.y0.toFixed(4)} vs caption top ${Math.max(...captionYs).toFixed(4)}`);
+check('captioned: box stays inside the declared frame',
+  box.x0 >= 0 && box.y0 >= 0 && box.x1 <= bw + 1e-9 && box.y1 <= bh + 1e-9);
 
 let recomputed = 0;
 for (let i = 1; i < out.points.length; i++) {

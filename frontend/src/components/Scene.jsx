@@ -13,19 +13,36 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import HandRig from './HandRig.jsx';
 import InkTrail from './InkTrail.jsx';
+import GhostReveal from './GhostReveal.jsx';
 import { usePathAnimation } from '../hooks/usePathAnimation.js';
+import { drawingBox } from '../lib/caption.js';
 
-const BOARD_SIZE = 8; // world units spanned by the drawing's longest side
+export const BOARD_SIZE = 8; // world units spanned by the drawing's longest side
 const PEN_LIFT = 0.42;   // how high (world z) the pen rises on pen-up hops
 const LIFT_RATE = 16;    // exp smoothing rate of the lift (higher = snappier)
 
 export default function Scene({
   pathData, duration, active, onComplete, speedRef, curveRef,
-  onNoteOn, onNoteOff, inkColor, weight,
+  onNoteOn, onNoteOff, inkColor, weight, ghostUrl = null, ghostActive = false,
 }) {
   const anim = usePathAnimation(
     pathData.points, pathData.aspect, duration, BOARD_SIZE, pathData.breaks
   );
+
+  // Where the portrait lives in world space — the same normalized→world map
+  // usePathAnimation applies, so the ghost reveal lands exactly under its own
+  // line art (and above the caption band, which it must not cover).
+  const ghostRect = useMemo(() => {
+    const b = drawingBox(pathData);
+    const aspect = Number(pathData.aspect) > 0 ? Number(pathData.aspect) : 1;
+    const w = aspect >= 1 ? 1 : aspect;
+    const h = aspect >= 1 ? 1 / aspect : 1;
+    const x0 = (b.x0 - w / 2) * BOARD_SIZE;
+    const x1 = (b.x1 - w / 2) * BOARD_SIZE;
+    const y0 = (b.y0 - h / 2) * BOARD_SIZE;
+    const y1 = (b.y1 - h / 2) * BOARD_SIZE;
+    return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
+  }, [pathData]);
 
   // The single shared pen-tip position (world space, z=0 drawing plane).
   const penTip = useRef(new THREE.Vector3());
@@ -118,6 +135,8 @@ export default function Scene({
           full-length written caption (~4.4k vertices, ~230 letter strokes),
           plus 2 bridge centers per stroke and the floating tip
           ≈ 15.8k — 22 000 keeps a real margin. */}
+      {/* Behind the ink, inside the same canvas every export composites. */}
+      <GhostReveal url={ghostUrl} rect={ghostRect} active={ghostActive} />
       <InkTrail anim={anim} penTip={penTip} clockRef={clock}
                 inkColor={inkColor} weight={weight}
                 maxPoints={22000} active={active} />

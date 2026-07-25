@@ -287,7 +287,7 @@ respects ink/paper; empty field = today's behaviour byte-identical.
   the nib width is absolute and small letters clog shut.
 - `InkTrail maxPoints` 16000 → 22000 to keep the buffer inequality true.
 
-## 5.2 Reveal, replay & friction batch (S+S+S+S)
+## 5.2 Reveal, replay & friction batch (S+S+S+S) — ✅ SHIPPED 2026-07-25
 - **Ghost reveal:** on done, crossfade the source photo (kept client-side as
   an object URL) at ~12% opacity under the drawing for 2s, then fade out —
   "look what it caught". Captured in the video (it happens inside the
@@ -300,6 +300,19 @@ respects ink/paper; empty field = today's behaviour byte-identical.
 - **Drag & drop:** dropzone on the idle overlay → existing onImage path.
 **Accept:** all four work on desktop+mobile; ghost reveal visible in saved
 video; replay does not add gallery entries or restart recording.
+
+**As shipped** (full entry in CLAUDE.md). Deviations worth knowing:
+- The ghost is a textured plane INSIDE the R3F scene, not a DOM crossfade.
+  That is what makes it register with the drawing (it uses the same
+  normalized→world mapping, so it also tracks the shrunken rect a 5.1
+  caption leaves) and what puts it in the video/GIF for free.
+- 12% opacity was invisible in practice — a photo over pale paper only
+  registers where it is dark. Shipped at 26%.
+- Replay is implemented by remounting the Canvas (`replayId` in its key),
+  which is the only way to reset InkTrail's append-only buffer. `phase`
+  deliberately stays `'done'` so nothing re-records or re-saves.
+- Drag & drop needed window-level preventDefault to stop a stray drop
+  navigating the browser away mid-draw — the non-obvious half of the item.
 
 ## 5.3 Daily masterpiece (M)
 **Buys:** a shared daily prompt and a reason to return; zero content risk.
