@@ -1,0 +1,33 @@
+futural.jhf — Hershey "Roman Simplex" single-stroke font
+========================================================
+
+`futural.jhf` in this directory is the Hershey occidental Roman Simplex
+typeface in James Hurt's JHF format, vendored VERBATIM (96 glyphs, ASCII
+32–127, 3.4 KB). It is also distributed under its NBS name `rowmans.jhf`;
+the byte contents are identical.
+
+Single-stroke ("engraving") fonts are the right shape for this app: every
+glyph is a set of centre-line polylines, exactly the same thing the backend
+emits for a traced photograph, so the hand can WRITE them with the same pen
+it draws with.
+
+REQUIRED ACKNOWLEDGEMENTS (per the Hershey distribution's use restriction —
+these must travel with the font data):
+
+  - The Hershey Fonts were originally created by Dr. A. V. Hershey while
+    working at the U. S. National Bureau of Standards.
+
+  - The format of the Font data in this distribution was originally created
+    by
+        James Hurt
+        Cognition, Inc.
+        900 Technology Park Drive
+        Billerica, MA 01821
+        (mit-eddie!ci-dandelion!hurt)
+
+The Hershey glyph data is in the public domain. The distribution's only
+restriction is the acknowledgement above, plus a prohibition on
+redistributing the data in the U.S. NTIS's own particular format — the JHF
+format used here is explicitly NOT that format.
+
+Full original notice: https://media.unpythonic.net/emergent-files/software/hershey/

@@ -69,7 +69,9 @@ function metaLine(e) {
   const bits = [MODE_LABEL[m.mode] ?? m.mode, m.detail, `${m.seconds}s`];
   if (m.strokes) bits.push(`${m.strokes} strokes`);
   if (m.instrument) bits.push(m.instrument);
-  return bits.filter(Boolean).join(' · ');
+  const line = bits.filter(Boolean).join(' · ');
+  // A piece the hand WROTE on is a gift, not a run — lead with what it says.
+  return m.dedication ? `“${m.dedication}” · ${line}` : line;
 }
 
 function saveThumb(e) {

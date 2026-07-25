@@ -113,11 +113,14 @@ export default function Scene({
 
       {/* Exact-append renderer: commits the animation's actual path vertices
           (plus a floating live-tip center), so the ink is complete and
-          frame-rate independent. maxPoints comfortably covers the largest
-          backend output (~4.6k vertices + 2 bridge centers per stroke). */}
+          frame-rate independent. maxPoints must clear the worst case:
+          dense trace at span=2 (~9.6k vertices, ≤640 strokes) PLUS a
+          full-length written caption (~4.4k vertices, ~230 letter strokes),
+          plus 2 bridge centers per stroke and the floating tip
+          ≈ 15.8k — 22 000 keeps a real margin. */}
       <InkTrail anim={anim} penTip={penTip} clockRef={clock}
                 inkColor={inkColor} weight={weight}
-                maxPoints={16000} active={active} />
+                maxPoints={22000} active={active} />
       <HandRig penTip={penTip} boardSize={BOARD_SIZE} />
     </>
   );

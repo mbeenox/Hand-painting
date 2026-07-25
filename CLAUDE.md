@@ -135,6 +135,10 @@ Hard-won deployment facts (do **not** regress):
 
 - `python3 verify_moods.py` — mood consonance invariant (parses MOODS from
   the JS; every scale tone must sit well below semitone/tritone controls).
+- `node frontend/scripts/verify_caption.mjs` — the writing hand: JHF parse
+  against the vendored font, ASCII folding, block layout, caption-band
+  geometry across box shapes, and the pathData contract `appendCaption`
+  owes `usePathAnimation`/`InkTrail`. Pure Node, no bundler, ~0.2 s.
 
 - **Backend:** in a venv with the pinned deps, feed a synthetic edge-rich image
   (draw lines/circles with cv2) through `detect_edges → sample_points →
@@ -144,6 +148,79 @@ Hard-won deployment facts (do **not** regress):
 - **Full visual check:** deploy a preview branch on Vercel (or `npm run dev`) and draw.
 
 ## Revision history
+
+- **Phase 5.1 — "the hand writes": dedications & signature (2026-07-25)** —
+  the app becomes a gift-maker: the pen that drew Mom also writes "Happy
+  birthday, Mom" underneath, stroke by stroke, playing its notes, and every
+  export carries it. Entirely client-side; no backend change.
+  (a) **Font.** Hershey occidental Roman Simplex vendored VERBATIM at
+  `frontend/src/lib/fonts/futural.jhf` (96 glyphs, ASCII 32–127, 3.4 KB;
+  byte-identical to the NBS-named `rowmans.jhf`). `lib/hershey.js` parses
+  the fixed-column JHF records (5 = glyph no., 3 = vertex count INCLUDING
+  the leading bearing pair, then 'R'-biased coordinate pairs; `" R"` = pen
+  up), derives metrics from 'H' rather than hardcoding them, folds arbitrary
+  user text to the ASCII the font covers (NFD + combining-mark strip, so
+  José → Jose; a small smart-punctuation table; emoji/CJK dropped and the
+  resulting double spaces collapsed), lays out and word-wraps blocks, and
+  loads the font through a DYNAMIC import so it ships as its own lazy
+  ~3.5 KB chunk. Licence acknowledgements ride along in
+  `fonts/HERSHEY-LICENSE.txt` + README (required by the distribution).
+  (b) **`handwrite()` — the non-obvious half.** Committing Hershey outlines
+  straight to the ribbon renders BROKEN letters: a stem is 2 mathematically
+  straight points, so `usePathAnimation` measures ZERO curvature, the pen
+  sweeps at full cruise and `InkTrail` lays its thinnest hairline — and
+  every stroke tapers in over its first `TAPER_N` (8) vertices while `s.w`
+  lerps up from `MIN_HALF`, so a 2-vertex stem is nothing but ramp.
+  Verified visually: "Happy birthday, Mom" came out missing the stems of
+  H, b, t, d. The fix is to give letters exactly what the backend gives a
+  traced edge chain — subdivide (~6 per cap height), jitter (3.5% of cap
+  height, endpoints pinned so letter parts still meet), Chaikin ×2 — because
+  a letter and an eyebrow ARE the same kind of object. Every vertex then
+  carries real curvature, the pen slows and presses as it does on the
+  portrait, and strokes are long enough to survive the taper. Bonus: the
+  writing looks hand-made rather than plotted. Vertex cost is budgeted
+  (`INK_BUDGET`), and `Scene`'s `InkTrail maxPoints` went **16000 → 22000**
+  to keep the don't-regress inequality true with a caption attached
+  (dense@span2 ~9.6k + caption ~4.4k + 2 bridges/stroke + 1 ≈ 15.8k).
+  (c) **`lib/caption.js` — composition.** The band is added to the drawing's
+  box and the WHOLE composition is re-normalized so the longest side is 1
+  again (the backend's own contract), then a new `aspect` is emitted. So the
+  portrait makes ROOM for the words (keeping ~73–80% of the frame height)
+  instead of the writing hanging off the bottom of the camera's view, which
+  is what a fixed `BOARD_SIZE` of 8 would have done — the board is exactly
+  the visible height (8 vs the camera's 8.007 units). Dedication centred at
+  4.5% cap height (fit ladder: 1 line → 2 lines → 86% → 74% → 3 lines →
+  62%, first size that swallows the text whole wins); optional signature
+  `hypnotic hand - <ISO date>` right-aligned at 3.0%. `pathLength` is
+  recomputed, so adaptive duration and the music follow the composition.
+  (d) **Applied AFTER `truncatePath`** — a dedication is a promise, not a
+  level of detail: at 40% Completeness the portrait is a gestural sketch and
+  the message is still written in full.
+  (e) **UI.** Dedication field + "Sign & date it" on the idle screen (48-char
+  cap). The dedication lives in component state ON PURPOSE (it belongs to
+  the gift, not the person — survives "draw another", never the tab);
+  `settings.signDate` persists like any preference. Touching either control
+  warms the font chunk. Gallery meta records the dedication and the wall
+  leads with it in quotes.
+  **Two sizing traps, both found by looking at rendered output:** the
+  signature at 2.1% cap height CLOGGED shut ("hand" → "hond") because the
+  nib width is ABSOLUTE while the letters shrink — raised to 3.0%; and a
+  right-aligned signature at a 3% bottom margin lands ON the export
+  watermark (`composite()` stamps the lowest ~4.2% of the canvas bottom-
+  right), so `BOTTOM_PAD` is **0.065** and must stay above ~0.055.
+  Music: letter strokes are short and sit at the bottom of the board, so
+  they read as low tonic piano taps under the portrait's melody — the plan's
+  "no special-casing" holds and it lands as a natural coda.
+  Verified: `node frontend/scripts/verify_caption.mjs` (font parse, folding,
+  layout, band geometry across box shapes, and the appendCaption contract —
+  normalized box, ascending breaks, caption strictly below the drawing,
+  exact object-identity no-op when there's nothing to write, ink-buffer
+  arithmetic); `npm run build` (font emitted as `futural-*.js`, main chunk
+  +0.8 KB); full E2E green with zero console errors, asserting the lazy
+  single font fetch, `signDate` persistence, the dedication in gallery meta,
+  and ~4.6k caption ink pixels in the exported PNG's writing band while the
+  watermark assertion still passes; screenshots confirm the pen tip lands
+  exactly on the letters mid-signature.
 
 - **v1** — initial single-file prototype (uploaded).
 - **v2 (2026-07-21)** — split into `backend/` (full, SciPy) + `api/` (Vercel port
@@ -547,4 +624,23 @@ Hard-won deployment facts (do **not** regress):
   `isTravel` is active.
 - `smooth_chains` allocates ≥4 output points per stroke; keep `maxPoints`
   in `Scene`'s `<InkTrail>` above max backend output + 2×max_strokes
-  (bridges) + 1 (floating tip) — currently 4600 + 640 + 1 ≪ 16000.
+  (bridges) + 1 (floating tip) — **and now + the caption**: dense trace at
+  span=2 (~9.6k points, ≤640 strokes) plus a full-length written dedication
+  (~4.4k points, ~230 letter strokes) ≈ 15.8k centers, hence **22000**.
+  `verify_caption.mjs` asserts the caption half of that arithmetic.
+- **Never commit raw Hershey outlines to the ribbon.** A glyph stem is two
+  mathematically straight points: zero curvature → full cruise speed → the
+  thinnest hairline `InkTrail` owns, and `TAPER_N`/`WIDTH_LERP` mean a
+  2-vertex stroke is pure ramp-in. Letters must go through
+  `hershey.handwrite()` (subdivide → jitter → Chaikin ×2), the same
+  treatment `smooth_chains` gives a traced edge chain, or they render with
+  their stems missing.
+- Caption geometry: `BOTTOM_PAD` stays above ~0.055 or a right-aligned
+  signature collides with the export watermark, which `composite()` stamps
+  in the lowest ~4.2% of the canvas (the board's bottom edge IS the canvas
+  bottom edge). Signature cap height stays ≥ ~0.028 — the nib width is
+  absolute, so smaller letters clog their counters shut.
+- The caption is appended AFTER `truncatePath`, never before: a dedication
+  is written in full at every Completeness setting. Empty dedication +
+  signDate off must return the input pathData object UNCHANGED (identity),
+  which is what keeps the ordinary path byte-identical.

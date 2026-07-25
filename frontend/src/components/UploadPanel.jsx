@@ -48,12 +48,33 @@ const styles = {
     display: 'block', lineHeight: 0,
   },
   sampleImg: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
+  captionRow: {
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 9,
+    marginTop: 12,
+  },
+  dedication: {
+    width: 320, maxWidth: '78vw', padding: '10px 16px', fontSize: 15,
+    fontFamily: 'Georgia, serif', textAlign: 'center',
+    border: '2px solid #1a1a2e', borderRadius: 999, background: '#fff',
+    color: '#1a1a2e', outlineColor: '#1a1a2e',
+  },
+  signLabel: {
+    display: 'flex', alignItems: 'center', gap: 7, fontSize: 14,
+    color: '#5a5a6e', cursor: 'pointer', userSelect: 'none',
+  },
 };
+
+// The hand writes the dedication in a single-stroke font in a band under the
+// drawing; past ~48 characters the lettering has to shrink far enough that
+// it stops reading as handwriting and starts reading as fine print.
+const DEDICATION_MAX = 48;
 
 export default function UploadPanel({
   phase, error, onImage, onReset,
   onDownloadImage, onShare, shareSupported, videoUrl, videoExt = 'webm',
   gifUrl = null, galleryCount = 0, onOpenGallery = null, paper = null,
+  dedication = '', onDedication = null, signDate = false, onSignDate = null,
+  onCaptionIntent = null,
 }) {
   // Paper-stock tints: the idle screen should read as the same sheet of
   // paper the drawing will happen on, not a white app floating over it.
@@ -248,6 +269,39 @@ export default function UploadPanel({
               </button>
             ))}
           </div>
+
+          {/* The hand writes (Feature 5.1): whatever goes in here is drawn
+              stroke-by-stroke under the portrait, in full, however far the
+              Completeness dial is turned down. Touching either control warms
+              the lazy font chunk so the draw never waits on it. */}
+          {onDedication && (
+            <div style={styles.captionRow}>
+              <input
+                type="text"
+                value={dedication}
+                maxLength={DEDICATION_MAX}
+                placeholder="…and have the hand write something"
+                aria-label="Dedication for the hand to write under the drawing"
+                style={styles.dedication}
+                onFocus={() => onCaptionIntent?.()}
+                onChange={(e) => onDedication(e.target.value)}
+              />
+              <label
+                style={paper ? { ...styles.signLabel, color: paper.sub } : styles.signLabel}
+              >
+                <input
+                  type="checkbox"
+                  checked={signDate}
+                  aria-label="Sign and date the drawing"
+                  onChange={(e) => {
+                    onCaptionIntent?.();
+                    onSignDate?.(e.target.checked);
+                  }}
+                />
+                Sign &amp; date it
+              </label>
+            </div>
+          )}
         </>
       )}
 

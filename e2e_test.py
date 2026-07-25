@@ -3,6 +3,8 @@ import time
 from playwright.sync_api import sync_playwright
 
 errors = []
+DEDICATION = "Happy birthday, Mom"
+
 with sync_playwright() as p:
     browser = p.chromium.launch()
     context = browser.new_context(viewport={"width": 1280, "height": 800},
@@ -84,6 +86,23 @@ with sync_playwright() as p:
     assert float(comp.get_attribute("value") or 0) == 1.0, "default must be 100%"
     page.click("text=⚙ Style")  # close the panel again
 
+    # --- Feature 5.1 "the hand writes": type a dedication + ask for the
+    # signature, then verify the vendored Hershey font is fetched as its OWN
+    # lazy chunk (the "nothing new on the critical path" guardrail) rather
+    # than shipped in the main bundle.
+    font_reqs = []
+    page.on("request", lambda r: font_reqs.append(r.url)
+            if "futural" in r.url or "hershey" in r.url.lower() else None)
+    ded_input = page.wait_for_selector("input[aria-label^='Dedication']",
+                                       timeout=5000)
+    assert int(ded_input.get_attribute("maxlength")) == 48, "dedication cap changed"
+    ded_input.fill(DEDICATION)
+    page.check("input[aria-label='Sign and date the drawing']")
+    signed = page.evaluate(
+        "() => JSON.parse(localStorage.getItem('hh-settings-v1') || '{}')"
+    )
+    assert signed.get("signDate") is True, "Sign & date should persist to settings"
+
     page.set_input_files("input[type=file]", "backend/test_input.png")
     # wait for processing → drawing (overlay disappears)
     page.wait_for_selector("h1", state="detached", timeout=30000)
@@ -145,6 +164,22 @@ with sync_playwright() as p:
     )
     print("watermark-ish pixels in bottom-right box:", wm_px)
     assert wm_px > 40, "export watermark not found in the saved PNG!"
+
+    # Feature 5.1: the writing is IN the export, in its own band under the
+    # portrait — dark ink across the middle of the bottom strip, where a
+    # caption-less run leaves bare paper. (The band clears the watermark, so
+    # the assertion above still passes: they must not fight for that corner.)
+    ink = im.crop((int(w * 0.18), int(h * 0.83), int(w * 0.82), int(h * 0.97)))
+    ink_px = sum(1 for r, g, b in ink.getdata() if r < 90 and g < 90 and b < 110)
+    print("caption ink pixels in the writing band:", ink_px)
+    assert ink_px > 300, "the hand did not write the dedication into the export!"
+    # …and it arrived as a SEPARATE request made only once the user showed
+    # intent, not baked into the entry bundle. (Dev serves the raw .jhf;
+    # `npm run build` emits it as its own `futural-*.js` chunk — both are a
+    # deferred fetch, which is the guardrail that matters.)
+    assert font_reqs, "Hershey font was never fetched — is it still lazy?"
+    assert len(set(font_reqs)) == 1, f"font fetched more than once: {font_reqs}"
+    print("hershey font chunk:", font_reqs[0].rsplit("/", 1)[-1])
 
     # Feature 2.2: the GIF finishes encoding right after the recorder stops —
     # its Save button must appear, and the blob must be a real looping GIF.
@@ -212,6 +247,10 @@ with sync_playwright() as p:
     assert len(stored) == 1, f"expected 1 gallery entry, found {len(stored)}"
     assert stored[0]["thumb"].startswith("data:image/jpeg"), "thumbnail malformed"
     assert stored[0]["meta"]["strokes"] > 0, "gallery meta missing strokes"
+    # Feature 5.1: the caption really made it into the drawn path — the hand
+    # wrote it, so the finished piece is filed on the wall as a gift.
+    assert stored[0]["meta"].get("dedication") == DEDICATION, \
+        f"gallery meta lost the dedication: {stored[0]['meta'].get('dedication')!r}"
     page.click("button[aria-label='Open gallery']")
     page.wait_for_selector("h2:has-text('Gallery')", timeout=5000)
     page.screenshot(path="e2e_6_gallery.png")

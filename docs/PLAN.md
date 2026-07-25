@@ -247,7 +247,7 @@ Chosen directions: the writing hand · reveal/replay/friction batch · daily
 masterpiece · share pages. Sequenced by magic-per-effort; 4.2 (rigged hand)
 and 4.3 (two-photo duet) remain open from Phase 4 and can interleave.
 
-## 5.1 The hand writes — dedications & signature (M) — FIRST
+## 5.1 The hand writes — dedications & signature (M) — ✅ SHIPPED 2026-07-25
 **Buys:** turns the app into a gift-maker; the pen that drew Mom also writes
 "Happy birthday, Mom" — and every letter plays its notes.
 **Design:** vendor a public-domain Hershey single-stroke font (futural.jhf,
@@ -270,6 +270,22 @@ domain, US Gov).
 **Accept:** dedication drawn stroke-by-stroke after the portrait with pen
 lifts between letters, plays notes, appears in PNG/video/GIF exports,
 respects ink/paper; empty field = today's behaviour byte-identical.
+
+**As shipped** (see CLAUDE.md for the full entry). Deviations worth knowing:
+- The caption band is not hung below a fixed board — the drawing's box GROWS
+  by the band and the whole composition is re-normalized to a unit long
+  side, so the portrait shrinks to ~73–80% of the frame and the camera
+  framing takes care of itself. `BOARD_SIZE` (8) is within 0.1% of the
+  camera's visible height, so anything hung below it would be off-screen.
+- Raw Hershey outlines render with their stems MISSING (straight segments
+  carry no curvature → hairline nib; short strokes are all taper). Letters
+  go through `handwrite()` — subdivide, jitter, Chaikin ×2, i.e. the same
+  treatment `smooth_chains` gives a traced chain. This is the load-bearing
+  detail of the feature.
+- Character cap is 48 (not 40); the fit ladder shrinks and wraps to 3 lines
+  before dropping anything. Signature sits at 3.0% cap height, not smaller —
+  the nib width is absolute and small letters clog shut.
+- `InkTrail maxPoints` 16000 → 22000 to keep the buffer inequality true.
 
 ## 5.2 Reveal, replay & friction batch (S+S+S+S)
 - **Ghost reveal:** on done, crossfade the source photo (kept client-side as

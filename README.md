@@ -97,6 +97,10 @@ Open http://localhost:5173.
 - `e2e_test.py` — headless-Chromium end-to-end test (needs Playwright and
   both servers running): uploads an image through the real UI and
   screenshots the drawing at several timestamps.
+- `frontend/scripts/verify_caption.mjs` — `node` unit checks for the writing
+  hand: the Hershey parser against the vendored font, and the path contract
+  `appendCaption` must honour.
+- `verify_moods.py` — the musical consonance gate for the four moods.
 
 ## Sample image credits
 
@@ -104,3 +108,14 @@ The bundled "watch a sample" portraits (`frontend/public/samples/`) are both
 public domain: the official NASA portrait of astronaut Mae C. Jemison
 (NASA image s87-45893) and Johannes Vermeer's *Girl with a Pearl Earring*
 (c. 1665, via Wikimedia Commons).
+
+## Font credit
+
+The hand writes dedications in the Hershey occidental Roman Simplex
+single-stroke font (`frontend/src/lib/fonts/futural.jhf`). The Hershey Fonts
+were originally created by Dr. A. V. Hershey while working at the U. S.
+National Bureau of Standards, and the format of the font data in this
+distribution was originally created by James Hurt, Cognition, Inc., 900
+Technology Park Drive, Billerica, MA 01821. The data is public domain; the
+full notice travels with it in
+`frontend/src/lib/fonts/HERSHEY-LICENSE.txt`.

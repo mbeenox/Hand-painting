@@ -23,6 +23,8 @@ import { useGallery } from './hooks/useGallery.js';
 import { processImage } from './api.js';
 import { getPaper, DEFAULT_PAPER } from './lib/papers.js';
 import { truncatePath } from './lib/truncatePath.js';
+import { appendCaption } from './lib/caption.js';
+import { loadHersheyFont } from './lib/hershey.js';
 
 const DEFAULT_SETTINGS = {
   paper: DEFAULT_PAPER, // paper stock: 'ivory' | 'noir' | 'kraft' | 'slate'
@@ -36,6 +38,7 @@ const DEFAULT_SETTINGS = {
   instrument: 'duet', // 'duet' | 'violin' | 'piano' → stroke-music voice
   mood: 'dawn',  // 'dawn' | 'dusk' | 'sakura' | 'hymn' → key/drone/character
   completeness: 1.0, // how far the artist goes (0.3–2.0; 1.0 = classic full)
+  signDate: false, // "Sign & date": the hand signs the piece when it's done
   scratch: false, // pen-scratch (nib-on-paper) sound when 🔊 is on — OFF by default
   sound: true,   // master 🔊 toggle — the show performs its music by default
   _v: 2,         // settings schema version (migration in loadSettings)
@@ -94,6 +97,21 @@ async function makeThumb(blob) {
   }
 }
 
+// The hand writes (Feature 5.1). The Hershey font is a lazy chunk, so this
+// is async — and deliberately forgiving: if the chunk fails to load, the
+// portrait still draws. A dedication is a bonus, never a gate.
+async function withCaption(path, dedication, signDate) {
+  if (!(dedication || '').trim() && !signDate) return path;
+  try {
+    return appendCaption(path, await loadHersheyFont(), {
+      dedication, signDate, date: new Date(),
+    });
+  } catch (e) {
+    console.warn('Caption unavailable; drawing without it.', e);
+    return path;
+  }
+}
+
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -124,6 +142,11 @@ export default function App() {
   // is satisfied without requiring a trip to the 🔊 button.
   const [soundOn, setSoundOn] = useState(settings.sound ?? true);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  // Dedication (Feature 5.1) lives in component state ON PURPOSE — a
+  // dedication belongs to the gift being made, not to the person making it,
+  // so it survives "draw another" but never the tab. (The "Sign & date"
+  // option IS a lasting preference, so that one lives in settings.)
+  const [dedication, setDedication] = useState('');
 
   const glElRef = useRef(null);
   const splashRef = useRef(null);
@@ -131,6 +154,8 @@ export default function App() {
   const curveRef = useRef(0);
   const soundOnRef = useRef(settings.sound ?? true);
   const settingsRef = useRef(settings);
+  const dedicationRef = useRef('');
+  useEffect(() => { dedicationRef.current = dedication; }, [dedication]);
   useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
   useEffect(() => {
@@ -177,7 +202,12 @@ export default function App() {
       // Completeness dial: strokes arrive in artist passes (contours →
       // structure → details), so cutting the tail leaves a coherent,
       // intentionally-unfinished sketch. Applied per run, like detail.
-      setPathData(truncatePath(data, settingsRef.current.completeness ?? 1));
+      let path = truncatePath(data, settingsRef.current.completeness ?? 1);
+      // …and THEN the writing (Feature 5.1). Order matters: a dedication is
+      // a promise, not a level of detail, so it is written in full even when
+      // the portrait above it is a 40% gestural sketch.
+      path = await withCaption(path, dedicationRef.current, settingsRef.current.signDate);
+      setPathData(path);
       setRunId((n) => n + 1);
       setPhase('drawing');
     } catch (e) {
@@ -251,6 +281,8 @@ export default function App() {
         instrument: s.instrument ?? 'duet',
         paper: s.paper ?? DEFAULT_PAPER,
         completeness: pathData?.completeness ?? 1,
+        // What the hand wrote (5.1) — a gift is worth labelling on the wall.
+        dedication: pathData?.caption?.dedication || undefined,
         seconds,
         strokes: pathData?.breaks?.length || undefined,
       });
@@ -382,6 +414,11 @@ export default function App() {
         recSupported={recSupported}
         galleryCount={galleryEntries.length}
         onOpenGallery={() => setGalleryOpen(true)}
+        dedication={dedication}
+        onDedication={setDedication}
+        signDate={settings.signDate ?? false}
+        onSignDate={(v) => updateSettings({ signDate: v })}
+        onCaptionIntent={loadHersheyFont}
       />
       {galleryOpen && (
         <GalleryWall
