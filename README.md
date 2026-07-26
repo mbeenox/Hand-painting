@@ -100,7 +100,13 @@ Open http://localhost:5173.
 - `frontend/scripts/verify_caption.mjs` — `node` unit checks for the writing
   hand: the Hershey parser against the vendored font, and the path contract
   `appendCaption` must honour.
+- `frontend/scripts/verify_masterpiece.mjs` — `node` unit checks for the
+  daily pick (determinism, full-cycle coverage) and the committed artwork
+  list (shape, CORS-capable hosts, artist spread).
 - `verify_moods.py` — the musical consonance gate for the four moods.
+- `scripts/curate_masterpieces.py` — regenerates the artwork list, vetting
+  every candidate through the app's own trace pipeline. Not part of the test
+  run; it takes ~20 minutes and hits the network.
 
 ## Sample image credits
 
@@ -108,6 +114,23 @@ The bundled "watch a sample" portraits (`frontend/public/samples/`) are both
 public domain: the official NASA portrait of astronaut Mae C. Jemison
 (NASA image s87-45893) and Johannes Vermeer's *Girl with a Pearl Earring*
 (c. 1665, via Wikimedia Commons).
+
+## Today's masterpiece — artwork credits
+
+The daily artwork offered on the idle screen comes from **The Metropolitan
+Museum of Art's Open Access collection**, released under Creative Commons
+Zero (CC0), which the Met donated to **Wikimedia Commons**. Every work in
+`frontend/public/masterpieces.json` was filtered to CC0 / public-domain
+licensing at curation time, and each is credited in the UI with its title,
+artist and date.
+
+Images are served from Wikimedia Commons rather than the Met's own image
+host for a concrete technical reason: `images.metmuseum.org` sends no
+`Access-Control-Allow-Origin` header, so the browser cannot fetch from it —
+and using such an image in the WebGL canvas would taint it, breaking PNG,
+video and GIF export. `upload.wikimedia.org` sends
+`Access-Control-Allow-Origin: *`. See `scripts/curate_masterpieces.py`,
+which regenerates the list.
 
 ## Font credit
 

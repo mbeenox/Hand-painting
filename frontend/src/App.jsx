@@ -25,6 +25,7 @@ import { getPaper, DEFAULT_PAPER } from './lib/papers.js';
 import { truncatePath } from './lib/truncatePath.js';
 import { appendCaption } from './lib/caption.js';
 import { loadHersheyFont } from './lib/hershey.js';
+import { todaysMasterpiece, fetchArtwork } from './lib/masterpiece.js';
 
 const DEFAULT_SETTINGS = {
   paper: DEFAULT_PAPER, // paper stock: 'ivory' | 'noir' | 'kraft' | 'slate'
@@ -159,6 +160,8 @@ export default function App() {
   const [replaying, setReplaying] = useState(false);
   const [replayId, setReplayId] = useState(0);
   const [sourceUrl, setSourceUrl] = useState(null);
+  // Today's masterpiece (5.3) — null until (and unless) it resolves.
+  const [masterpiece, setMasterpiece] = useState(null);
 
   const glElRef = useRef(null);
   const sourceRef = useRef(null);    // { blob, opts } → Redraw
@@ -274,6 +277,27 @@ export default function App() {
     const src = sourceRef.current;
     if (src?.blob) handleImage(src.blob, src.opts);
   }, [handleImage]);
+
+  // Today's masterpiece (5.3). Resolved once, after first paint, and never
+  // awaited by anything on the critical path — if it fails, the chip is
+  // simply absent and the app is exactly as it was.
+  useEffect(() => {
+    let alive = true;
+    todaysMasterpiece()
+      .then((m) => { if (alive) setMasterpiece(m); })
+      .catch(() => { /* no chip */ });
+    return () => { alive = false; };
+  }, []);
+
+  const drawMasterpiece = useCallback(async () => {
+    if (!masterpiece) return;
+    try {
+      handleImage(await fetchArtwork(masterpiece));
+    } catch (e) {
+      console.warn('Could not fetch today’s masterpiece.', e);
+      setError('Could not reach today’s masterpiece — try a photo instead.');
+    }
+  }, [masterpiece, handleImage]);
 
   const reset = useCallback(() => {
     stop();
@@ -496,6 +520,8 @@ export default function App() {
         onReplay={replay}
         replaying={replaying}
         onRedraw={redraw}
+        masterpiece={masterpiece}
+        onMasterpiece={drawMasterpiece}
       />
       {galleryOpen && (
         <GalleryWall

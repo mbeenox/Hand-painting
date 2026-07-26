@@ -9,6 +9,7 @@
  * cold visitor reaches a live drawing in one click.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { creditLine } from '../lib/masterpiece.js';
 
 const SAMPLES = [
   { src: '/samples/astronaut.jpg', label: 'Astronaut' },
@@ -62,6 +63,23 @@ const styles = {
     display: 'flex', alignItems: 'center', gap: 7, fontSize: 14,
     color: '#5a5a6e', cursor: 'pointer', userSelect: 'none',
   },
+  masterRow: {
+    display: 'flex', alignItems: 'center', gap: 12, marginTop: 14,
+    padding: '8px 16px 8px 8px', maxWidth: '86vw',
+    border: '2px solid #1a1a2e', borderRadius: 999,
+    background: '#fff', color: '#1a1a2e', cursor: 'pointer',
+    fontFamily: 'Georgia, serif', textAlign: 'left',
+  },
+  masterThumb: {
+    width: 44, height: 44, borderRadius: 999, objectFit: 'cover',
+    display: 'block', flex: '0 0 auto', background: '#e8e2d4',
+  },
+  masterLabel: { display: 'block', fontSize: 15, lineHeight: 1.25 },
+  masterCredit: {
+    display: 'block', fontSize: 12, opacity: 0.72, lineHeight: 1.3,
+    maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
 };
 
 // Drop target feedback: an inset dashed rule in the paper's own ink, so the
@@ -83,6 +101,7 @@ export default function UploadPanel({
   dedication = '', onDedication = null, signDate = false, onSignDate = null,
   onCaptionIntent = null,
   onReplay = null, replaying = false, onRedraw = null,
+  masterpiece = null, onMasterpiece = null,
 }) {
   // Paper-stock tints: the idle screen should read as the same sheet of
   // paper the drawing will happen on, not a white app floating over it.
@@ -95,6 +114,7 @@ export default function UploadPanel({
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const [dragging, setDragging] = useState(false);
+  const [loadingArt, setLoadingArt] = useState(false);
   const [cameraOn, setCameraOn] = useState(false);
   const [facing, setFacing] = useState('user'); // 'user' (selfie) | 'environment' (back)
   const [canFlip, setCanFlip] = useState(false); // more than one camera present
@@ -337,6 +357,33 @@ export default function UploadPanel({
               </button>
             ))}
           </div>
+
+          {/* Today's masterpiece (Feature 5.3). Rendered only when the pick
+              resolved — the whole feature is opt-in-by-availability, so a
+              failed fetch or an unreachable list simply means no chip, never
+              a broken idle screen. Credit per the Met's Open Access terms. */}
+          {masterpiece && onMasterpiece && (
+            <button
+              style={paper
+                ? { ...styles.masterRow, borderColor: paper.text }
+                : styles.masterRow}
+              onClick={() => { setLoadingArt(true); onMasterpiece(); }}
+              disabled={loadingArt}
+              aria-label={`Draw today's masterpiece: ${creditLine(masterpiece)}`}
+              title={`${creditLine(masterpiece)} — The Metropolitan Museum of Art, Open Access (CC0), via Wikimedia Commons`}
+            >
+              <img
+                src={masterpiece.img} alt="" loading="lazy"
+                style={styles.masterThumb}
+              />
+              <span>
+                <span style={styles.masterLabel}>
+                  {loadingArt ? 'Fetching the artwork…' : "Today's masterpiece"}
+                </span>
+                <span style={styles.masterCredit}>{creditLine(masterpiece)}</span>
+              </span>
+            </button>
+          )}
 
           {/* The hand writes (Feature 5.1): whatever goes in here is drawn
               stroke-by-stroke under the portrait, in full, however far the

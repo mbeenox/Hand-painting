@@ -314,7 +314,7 @@ video; replay does not add gallery entries or restart recording.
 - Drag & drop needed window-level preventDefault to stop a stray drop
   navigating the browser away mid-draw — the non-obvious half of the item.
 
-## 5.3 Daily masterpiece (M)
+## 5.3 Daily masterpiece (M) — ✅ SHIPPED 2026-07-25
 **Buys:** a shared daily prompt and a reason to return; zero content risk.
 **Design:** The Met Open Access API (CC0): pick deterministically by date
 (seeded from YYYY-MM-DD) from a curated object-ID list (~200 paintings with
@@ -325,6 +325,24 @@ images allow cross-origin fetch; if a fetch fails, chip hides (never blocks
 the core flow). Credit line shown per Met guidelines.
 **Accept:** same artwork offered to everyone on a given date; one click →
 drawing; offline/API-down degrades to hiding the chip.
+
+**As shipped** (full entry in CLAUDE.md). Deviations worth knowing:
+- **Images come from Wikimedia Commons, not the Met's API.**
+  `images.metmuseum.org` sends NO `Access-Control-Allow-Origin` — the plan's
+  central assumption was wrong. That blocks `fetch().blob()` outright, and an
+  image from there would TAINT the WebGL canvas via the 5.2 ghost reveal,
+  making `toDataURL`/`captureStream` throw and breaking every export. The Met
+  donated its Open Access collection to Commons, which serves
+  `Access-Control-Allow-Origin: *`, so the same artworks arrive from a usable
+  host with no backend proxy.
+- The pick is a coprime STRIDE over the list, not a date hash: a hash has a
+  1-in-200 chance of repeating yesterday's artwork; a stride guarantees a
+  full cycle before any repeat.
+- Curation scores candidates through the app's own trace pipeline, not on
+  metadata. Three separate classes of bad pick (picture frames, oval-mounted
+  miniatures, undescribed decorative objects) were only visible by RENDERING
+  the picks — each drove a new filter. Regenerating the list without looking
+  at a few days' output is how they come back.
 
 ## 5.4 Share pages (L) — LAST, the infrastructure step
 **Buys:** results get URLs; the watermark finally has somewhere to point.

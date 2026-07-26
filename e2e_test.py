@@ -31,6 +31,13 @@ with sync_playwright() as p:
         {kind: 'videoinput', deviceId: 'back', label: 'Back'},
       ];
     """)
+    # Feature 5.3: the artwork host is unreachable from this sandbox, so stub
+    # it at the CONTEXT level before any navigation — the chip's <img> loads
+    # on the first idle render and again after every goto/reload.
+    context.route("**/upload.wikimedia.org/**", lambda route: route.fulfill(
+        path="frontend/public/samples/pearl.jpg", content_type="image/jpeg",
+        headers={"access-control-allow-origin": "*"}))
+
     page = context.new_page()
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: errors.append(str(e)))
@@ -45,6 +52,30 @@ with sync_playwright() as p:
     # Sound is ON by default now — the toggle must already read "Mute".
     assert page.query_selector("button[aria-label='Mute sound']"), \
         "sound should be ON by default"
+
+    # --- Feature 5.3 "Today's masterpiece". The artwork itself lives on
+    # Wikimedia, which this sandbox's headless Chromium cannot reach, so the
+    # image request is STUBBED with a bundled sample. That is the right seam
+    # anyway: what needs testing is our chip → fetch → blob → onImage path,
+    # not Wikimedia's uptime. (Wikimedia's CORS headers were verified
+    # separately against the live host — see scripts/curate_masterpieces.py.)
+    chip = page.wait_for_selector("button[aria-label^=\"Draw today's masterpiece\"]",
+                                  timeout=10000)
+    credit = chip.get_attribute("aria-label")
+    assert len(credit) > 34, f"masterpiece chip has no credit line: {credit!r}"
+    assert chip.query_selector("img[src^='https://upload.wikimedia.org/']"), \
+        "chip thumbnail must come from the CORS-capable host"
+    # The same date must always yield the same work — that is the whole point.
+    pick_a = page.evaluate("() => localStorage.getItem('hh-masterpiece-v1')")
+    page.reload(wait_until="networkidle")
+    pick_b = page.evaluate("() => localStorage.getItem('hh-masterpiece-v1')")
+    assert pick_a and pick_a == pick_b, "today's pick is not stable across loads"
+    print("masterpiece:", credit[:78])
+    page.click("button[aria-label^=\"Draw today's masterpiece\"]")
+    page.wait_for_selector("h1", state="detached", timeout=30000)
+    time.sleep(2)
+    page.screenshot(path="e2e_10_masterpiece.png")
+    page.goto("http://localhost:5173", wait_until="networkidle")  # reset for the camera flow
 
     # --- Camera flow (mocked device): open camera → Flip must appear (two
     # cameras enumerated) and work → Snap must send focus=face, the backend

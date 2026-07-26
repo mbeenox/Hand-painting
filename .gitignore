@@ -8,3 +8,6 @@ preview_*.png
 e2e_*.png
 test_input.png
 drawing_*.png
+# curation intermediates (regenerate with scripts/curate_masterpieces.py)
+.masterpiece-cache.json
+.masterpiece-vetted.json

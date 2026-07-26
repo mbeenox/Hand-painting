@@ -149,6 +149,60 @@ Hard-won deployment facts (do **not** regress):
 
 ## Revision history
 
+- **Phase 5.3 — Today's masterpiece (2026-07-25)** — the idle screen offers
+  one public-domain artwork a day, the same one for everyone on that date,
+  one click from a drawing. `lib/masterpiece.js` + a curated
+  `frontend/public/masterpieces.json` + a chip in `UploadPanel`.
+  (a) **The images do NOT come from the Met's API, and that is not a
+  shortcut.** `images.metmuseum.org` sends no `Access-Control-Allow-Origin`
+  (measured, not assumed), which breaks the feature twice: `fetch(url).blob()`
+  is refused outright, AND — worse — feeding such an image to the WebGL
+  canvas (which the 5.2 ghost reveal does) TAINTS it, and a tainted canvas
+  makes `toDataURL`/`captureStream` throw, silently killing PNG, video and
+  GIF export for everyone. Wikimedia Commons serves
+  `Access-Control-Allow-Origin: *` and hosts the Met's own Open Access
+  donation, so the same artworks arrive from a host the browser will talk to,
+  with no backend proxy and no new SSRF surface. `verify_masterpiece.mjs`
+  asserts every URL is a Wikimedia one, precisely so this cannot regress.
+  (b) **The daily pick is a coprime stride, not a hash.** Hashing the date is
+  the obvious approach and was the first cut, but a hash is only uniform in
+  the limit: with 200 works there is a 1-in-200 chance any day repeats the
+  one before it (~1-in-3 across a year). Walking the list in a stride
+  coprime with its length is a bijection — every work comes up exactly once
+  before any repeats — and the stride is ~0.618·n so consecutive days land
+  far apart rather than marching through one artist's block. Still a pure
+  function of the date, so everyone still shares the day's artwork.
+  `dayKey` is LOCAL, not UTC: "today's masterpiece" should mean *your* today.
+  (c) **Curation is committed** (`scripts/curate_masterpieces.py`) and vets
+  every candidate through THIS APP'S OWN pipeline — `detect_edges`,
+  `trace_chains`, and the same Haar cascade the camera uses — against a band
+  calibrated on the two bundled samples (astronaut: density 0.042, 212
+  chains; pearl: 0.059, 464). Metadata alone is a weak proxy for "draws
+  beautifully".
+  **What only rendering the output could reveal:** the first list scored well
+  on every number and was still wrong. Commons photographs of museum works
+  often include the PICTURE FRAME, so one daily pick drew a large ornate
+  rectangle with a thumbnail-sized sitter inside. Fixed with two measured
+  discriminators — long axis-aligned runs near the margins (Hough:
+  known-good 0, framed 1–3) and outer-ring-to-core ink ratio (known-good
+  0.43–0.62, bordered 1.44). The second pass then surfaced portrait
+  MINIATURES (locket-sized watercolours photographed in decorative oval
+  mounts) which pass every numeric test because a mount is not a straight
+  frame; excluded by name from the Commons description/category/filename.
+  A third pass surfaced decorative objects with no description at all (a
+  "Nun's Badge") — caught by whole-word filename matching. Vetted scores are
+  cached (`.masterpiece-vetted.json`) so re-selection is free.
+  (d) **It can never block the core flow**: the list is fetched lazily after
+  first paint, the day's pick is cached in localStorage (a returning visitor
+  costs zero network), and EVERY failure path returns null so the chip is
+  simply absent. Credit line per the Met's Open Access terms.
+  Verified: `verify_masterpiece.mjs` (determinism, full-cycle coverage,
+  consecutive-day spread, list shape, CORS host, artist spread) plus the E2E
+  clicking the chip through to a drawing with the Wikimedia request stubbed
+  — this sandbox's headless Chromium cannot reach external hosts, and that is
+  the right seam anyway: what needs testing is our chip → fetch → blob →
+  onImage path, not Wikimedia's uptime.
+
 - **Phase 5.2 — reveal, replay & friction (2026-07-25)** — the four small
   items from `docs/PLAN.md`, shipped together.
   (a) **Ghost reveal.** On `done` the SOURCE PHOTO breathes in under the ink,
@@ -711,3 +765,17 @@ Hard-won deployment facts (do **not** regress):
 - Don't assert on short-lived canvas animations with `page.screenshot()` —
   the round trip plus PNG encode is slow enough to miss a 2s window. Sample
   the canvas in-page instead (see the ghost check in `e2e_test.py`).
+- **Every masterpiece image URL must stay on `upload.wikimedia.org`.** The
+  Met's own host sends no CORS header: the fetch would fail, and any such
+  image reaching the WebGL canvas (the ghost reveal puts it there) taints it,
+  which makes `toDataURL`/`captureStream` throw and kills PNG/video/GIF
+  export. `verify_masterpiece.mjs` asserts this.
+- The daily pick must stay a pure function of the date with a coprime stride
+  (not a hash), or the calendar can repeat yesterday's artwork.
+- "Today's masterpiece" is lazy and failure-silent by contract: the list is
+  fetched after first paint, and every error path returns null so the chip
+  vanishes rather than blocking the idle screen.
+- Curating by metadata alone does NOT work. Candidates must be scored through
+  the real pipeline, and the frame/ring/miniature/object filters exist
+  because each one shipped a bad daily pick before it was added — RENDER a
+  few days' picks before trusting a regenerated list.
