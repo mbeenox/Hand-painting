@@ -25,8 +25,18 @@ export function truncatePath(data, label) {
     ? data.breaks
     : [0];
 
-  // Cumulative length over the whole path (hop segments included — they're
-  // a tiny share and this matches how the backend reports pathLength).
+  // Cumulative length over the whole path (hop segments included — this
+  // matches how the backend reports pathLength, and the dial's calibration
+  // was verified against it).
+  //
+  // MEASURED, DO NOT "FIX" CASUALLY: pen-up travel is not the tiny share the
+  // original note assumed — 28–33% on a single traced photo, ~50% on a
+  // two-photo duet. Switching this to ink-only is more principled and was
+  // tried, but it moves the cut by 23–43% at the SAME dial label, which
+  // silently redefines every stored Completeness setting and breaks the
+  // "100% = the classic drawing" anchoring that baseFrac was calibrated
+  // against. If it is ever changed, the baseFrac calibration has to be
+  // re-measured on both samples at the same time.
   const cum = new Array(pts.length).fill(0);
   for (let i = 1; i < pts.length; i++) {
     const dx = pts[i][0] - pts[i - 1][0];

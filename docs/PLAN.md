@@ -175,7 +175,7 @@ at extreme reaches (arm length ×1.06 already keeps bends gentle); +2MB load
 depends on); no elbow flips across a full std portrait; fallback renders if
 the glb 404s; bundle main chunk unchanged (model lazy).
 
-### 4.3 Two-photo duet — L (the flagship; do last, everything feeds it)
+### 4.3 Two-photo duet — L — ✅ SHIPPED 2026-07-26
 **Buys:** a novel shareable format (couples, pet+owner); the musical concept
 (two portraits in conversation) is the app's thesis stated twice.
 **Design:**
@@ -208,6 +208,21 @@ flow untouched, duet is opt-in).
 **Accept:** two photos → side-by-side portraits drawn in alternation,
 violin/piano conversation, one video with both + music; single-photo flow
 byte-identical to today.
+
+**As shipped** (full entry in CLAUDE.md). Deviations worth knowing:
+- Strokes interleave in proportional RUNS (~44 gutter crossings), not one at
+  a time. Per-stroke alternation was implemented first and measured: the
+  composed path length went from ~55 to 388 because the pen was mostly
+  flying across the gutter. Runs also read better and make the music trade
+  phrases rather than alternate notes.
+- Panels are traced one notch COARSER, not finer. The design section said
+  finer; the risks section said `fine`. The risks section was right twice
+  over — a half-width panel at higher detail reads as mush, and two `dense`
+  panels plus a caption overflow the ink buffer.
+- The panel is derived from the pen's x via `duet.splitX`, not carried as a
+  per-stroke array, so it survives truncation and the caption band with
+  nothing to keep in sync.
+- The ghost reveal (5.2) gained one plane per panel.
 
 ---
 

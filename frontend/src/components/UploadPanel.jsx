@@ -63,6 +63,26 @@ const styles = {
     display: 'flex', alignItems: 'center', gap: 7, fontSize: 14,
     color: '#5a5a6e', cursor: 'pointer', userSelect: 'none',
   },
+  duetOpen: {
+    marginTop: 10, padding: '6px 10px', fontSize: 14, fontFamily: 'Georgia, serif',
+    background: 'none', border: 'none', color: '#5a5a6e', cursor: 'pointer',
+    textDecoration: 'underline dotted', textUnderlineOffset: 4,
+  },
+  duetRow: {
+    display: 'flex', alignItems: 'center', gap: 10, marginTop: 12,
+    flexWrap: 'wrap', justifyContent: 'center',
+  },
+  duetSlot: {
+    width: 62, height: 62, padding: 0, borderRadius: 12, overflow: 'hidden',
+    border: '2px dashed #1a1a2e', background: '#fff', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  duetThumb: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
+  duetPlus: { fontSize: 26, color: '#1a1a2e', lineHeight: 1 },
+  duetCancel: {
+    width: 32, height: 32, borderRadius: 999, border: '2px solid #1a1a2e',
+    background: '#fff', color: '#1a1a2e', cursor: 'pointer', fontSize: 14,
+  },
   masterRow: {
     display: 'flex', alignItems: 'center', gap: 12, marginTop: 14,
     padding: '8px 16px 8px 8px', maxWidth: '86vw',
@@ -101,7 +121,7 @@ export default function UploadPanel({
   dedication = '', onDedication = null, signDate = false, onSignDate = null,
   onCaptionIntent = null,
   onReplay = null, replaying = false, onRedraw = null,
-  masterpiece = null, onMasterpiece = null,
+  masterpiece = null, onMasterpiece = null, onDuet = null,
 }) {
   // Paper-stock tints: the idle screen should read as the same sheet of
   // paper the drawing will happen on, not a white app floating over it.
@@ -115,6 +135,11 @@ export default function UploadPanel({
   const streamRef = useRef(null);
   const [dragging, setDragging] = useState(false);
   const [loadingArt, setLoadingArt] = useState(false);
+  // Duet (4.3): opt-in second slot. The single-photo flow above is untouched
+  // — this is a separate mode you have to ask for.
+  const [duetOpen, setDuetOpen] = useState(false);
+  const [duetFiles, setDuetFiles] = useState([null, null]);
+  const duetRefs = [useRef(null), useRef(null)];
   const [cameraOn, setCameraOn] = useState(false);
   const [facing, setFacing] = useState('user'); // 'user' (selfie) | 'environment' (back)
   const [canFlip, setCanFlip] = useState(false); // more than one camera present
@@ -385,6 +410,54 @@ export default function UploadPanel({
             </button>
           )}
 
+          {/* Two-photo duet (Feature 4.3). Opt-in: the single-photo flow
+              above never changes. Two portraits are traced in parallel and
+              welded into ONE path, drawn in alternation — and because the
+              panel decides the voice, they play as an actual duet. */}
+          {onDuet && (
+            duetOpen ? (
+              <div style={styles.duetRow}>
+                {[0, 1].map((i) => (
+                  <button
+                    key={i}
+                    style={styles.duetSlot}
+                    onClick={() => duetRefs[i].current?.click()}
+                    aria-label={i === 0 ? 'Choose the first photo' : 'Choose the second photo'}
+                    title={duetFiles[i]?.name || 'Choose a photo'}
+                  >
+                    {duetFiles[i]
+                      ? <img src={URL.createObjectURL(duetFiles[i])} alt=""
+                             style={styles.duetThumb} />
+                      : <span style={styles.duetPlus}>+</span>}
+                  </button>
+                ))}
+                <button
+                  style={duetFiles[0] && duetFiles[1]
+                    ? styles.compact
+                    : { ...styles.compact, opacity: 0.5, cursor: 'default' }}
+                  disabled={!(duetFiles[0] && duetFiles[1])}
+                  onClick={() => onDuet(duetFiles[0], duetFiles[1])}
+                >
+                  Draw the duet ♪
+                </button>
+                <button
+                  style={styles.duetCancel}
+                  onClick={() => { setDuetOpen(false); setDuetFiles([null, null]); }}
+                  aria-label="Cancel duet"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <button
+                style={paper ? { ...styles.duetOpen, color: paper.sub } : styles.duetOpen}
+                onClick={() => setDuetOpen(true)}
+              >
+                …or draw two photos as a duet ♪
+              </button>
+            )
+          )}
+
           {/* The hand writes (Feature 5.1): whatever goes in here is drawn
               stroke-by-stroke under the portrait, in full, however far the
               Completeness dial is turned down. Touching either control warms
@@ -424,6 +497,17 @@ export default function UploadPanel({
         ref={fileRef} type="file" accept="image/*"
         style={{ display: 'none' }} onChange={onFile}
       />
+      {[0, 1].map((i) => (
+        <input
+          key={i} ref={duetRefs[i]} type="file" accept="image/*"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) setDuetFiles((d) => (i === 0 ? [f, d[1]] : [d[0], f]));
+            e.target.value = '';
+          }}
+        />
+      ))}
     </div>
   );
 }

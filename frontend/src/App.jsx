@@ -26,6 +26,7 @@ import { truncatePath } from './lib/truncatePath.js';
 import { appendCaption } from './lib/caption.js';
 import { loadHersheyFont } from './lib/hershey.js';
 import { todaysMasterpiece, fetchArtwork } from './lib/masterpiece.js';
+import { composeDuet } from './lib/composeDuet.js';
 
 const DEFAULT_SETTINGS = {
   paper: DEFAULT_PAPER, // paper stock: 'ivory' | 'noir' | 'kraft' | 'slate'
@@ -55,6 +56,14 @@ const SETTINGS_KEY = 'hh-settings-v1';
 // nothing re-recorded. Just the pleasure of watching it happen again.
 const REPLAY_SPEED = 4;
 const REPLAY_MIN_S = 4;
+
+// Two-photo duet (4.3): each panel is traced one notch COARSER than the
+// viewer's setting. Two reasons, and the second is not optional — a panel is
+// drawn at roughly half width, so the same stroke budget reads as mush; and
+// two panels at `dense` would need ~25.8k ribbon centers against InkTrail's
+// 26k ceiling once a written caption is added, which would silently truncate
+// the end of the drawing.
+const DUET_DETAIL = { dense: 'std', std: 'fine', fine: 'fine' };
 
 const AUTO_PACE_UPS = 1.6; // path units per second
 const AUTO_MIN_S = 20;
@@ -159,13 +168,14 @@ export default function App() {
   // moment it is replaced.
   const [replaying, setReplaying] = useState(false);
   const [replayId, setReplayId] = useState(0);
-  const [sourceUrl, setSourceUrl] = useState(null);
+  // One entry per source photo: a single drawing has one, a duet has two.
+  const [sourceUrls, setSourceUrls] = useState([]);
   // Today's masterpiece (5.3) — null until (and unless) it resolves.
   const [masterpiece, setMasterpiece] = useState(null);
 
   const glElRef = useRef(null);
-  const sourceRef = useRef(null);    // { blob, opts } → Redraw
-  const sourceUrlRef = useRef(null); // the live object URL (ownership)
+  const sourceRef = useRef(null);     // { blobs, opts } → Redraw
+  const sourceUrlsRef = useRef([]);   // the live object URLs (ownership)
   const replayingRef = useRef(false);
   const splashRef = useRef(null);
   const speedRef = useRef(0);
@@ -177,7 +187,7 @@ export default function App() {
   useEffect(() => { replayingRef.current = replaying; }, [replaying]);
   // Object URLs are a manual resource; release the last one on teardown.
   useEffect(() => () => {
-    if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
+    sourceUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
   }, []);
   useEffect(() => { soundOnRef.current = soundOn; }, [soundOn]);
   useEffect(() => { settingsRef.current = settings; }, [settings]);
@@ -204,11 +214,44 @@ export default function App() {
 
   // Stroke events from the Scene → the sound engine, with the user's chosen
   // instrument attached (read via ref so the callback identity stays stable).
+  // `panelVoice` arrives only on a two-photo duet (4.3), and only overrides
+  // the DEFAULT duet split — a viewer who explicitly asked for violin-only
+  // still gets violin on both portraits.
   const handleNoteOn = useCallback(
-    (pitch01, curve01, estDur) =>
-      noteOn(pitch01, curve01, estDur, settingsRef.current.instrument ?? 'duet'),
+    (pitch01, curve01, estDur, panelVoice) => {
+      const chosen = settingsRef.current.instrument ?? 'duet';
+      noteOn(pitch01, curve01, estDur,
+        chosen === 'duet' && panelVoice ? panelVoice : chosen);
+    },
     [noteOn]
   );
+
+  // Own the object URLs for the source photo(s): revoke the previous set,
+  // mint a new one per image. Never throws — no reveal is always better than
+  // no drawing.
+  const rememberSources = useCallback((blobs, opts = {}) => {
+    sourceRef.current = { blobs, opts };
+    sourceUrlsRef.current.forEach((u) => URL.revokeObjectURL(u));
+    try {
+      sourceUrlsRef.current = blobs.map((b) => URL.createObjectURL(b));
+    } catch {
+      sourceUrlsRef.current = [];
+    }
+    setSourceUrls(sourceUrlsRef.current);
+  }, []);
+
+  // The tail every run shares: cut to Completeness, then write the
+  // dedication, then show it. Order matters — a dedication is a promise, not
+  // a level of detail, so it is written in full even when the portrait above
+  // it is a 40% gestural sketch.
+  const present = useCallback(async (data) => {
+    let path = truncatePath(data, settingsRef.current.completeness ?? 1);
+    path = await withCaption(path, dedicationRef.current,
+                             settingsRef.current.signDate);
+    setPathData(path);
+    setRunId((n) => n + 1);
+    setPhase('drawing');
+  }, []);
 
   const handleImage = useCallback(async (fileOrBlob, opts = {}) => {
     setError(null);
@@ -217,15 +260,7 @@ export default function App() {
     // Hold on to the source (Feature 5.2): the blob so "Redraw" can run the
     // whole pipeline again, and an object URL so the ghost reveal has a photo
     // to show. Neither ever leaves the device.
-    sourceRef.current = { blob: fileOrBlob, opts };
-    if (sourceUrlRef.current) URL.revokeObjectURL(sourceUrlRef.current);
-    try {
-      sourceUrlRef.current = URL.createObjectURL(fileOrBlob);
-      setSourceUrl(sourceUrlRef.current);
-    } catch {
-      sourceUrlRef.current = null;
-      setSourceUrl(null); // no reveal; the drawing is unaffected
-    }
+    rememberSources([fileOrBlob], opts);
     // This runs inside the upload/sample/camera CLICK — the user gesture that
     // lets the (on-by-default) AudioContext start before the draw begins.
     if (soundOnRef.current) setSoundEnabled(true);
@@ -238,20 +273,45 @@ export default function App() {
       // Completeness dial: strokes arrive in artist passes (contours →
       // structure → details), so cutting the tail leaves a coherent,
       // intentionally-unfinished sketch. Applied per run, like detail.
-      let path = truncatePath(data, settingsRef.current.completeness ?? 1);
-      // …and THEN the writing (Feature 5.1). Order matters: a dedication is
-      // a promise, not a level of detail, so it is written in full even when
-      // the portrait above it is a 40% gestural sketch.
-      path = await withCaption(path, dedicationRef.current, settingsRef.current.signDate);
-      setPathData(path);
-      setRunId((n) => n + 1);
-      setPhase('drawing');
+      await present(data);
     } catch (e) {
       setError(e.message);
       setPhase('idle');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setSoundEnabled]);
+  }, [setSoundEnabled, rememberSources, present]);
+
+  /**
+   * Two photographs, one drawing (4.3). Two parallel calls to the SAME
+   * endpoint — no backend change — then `composeDuet` welds the results into
+   * a single path the rest of the app cannot tell from an ordinary one.
+   * If one side fails to trace, the other is drawn alone rather than
+   * throwing away a good photograph.
+   */
+  const handleDuet = useCallback(async (blobA, blobB) => {
+    if (!blobA || !blobB) return;
+    setError(null);
+    setStillBlob(null);
+    setReplaying(false);
+    rememberSources([blobA, blobB], { duet: true });
+    if (soundOnRef.current) setSoundEnabled(true);
+    setPhase('processing');
+    try {
+      const s = settingsRef.current;
+      const detail = DUET_DETAIL[s.detail] ?? 'fine';
+      const [a, b] = await Promise.all([
+        processImage(blobA, detail, s.mode),
+        processImage(blobB, detail, s.mode),
+      ]);
+      const composed = composeDuet(a, b);
+      if (!composed) throw new Error('Neither photo could be traced.');
+      await present(composed);
+    } catch (e) {
+      setError(e.message);
+      setPhase('idle');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setSoundEnabled, rememberSources, present]);
 
   // A replay ends by clearing `replaying`; a real draw ends by finishing.
   // Read through a ref so this callback's identity stays stable — it is a
@@ -275,8 +335,10 @@ export default function App() {
   // drawing. The app's thesis in one button.
   const redraw = useCallback(() => {
     const src = sourceRef.current;
-    if (src?.blob) handleImage(src.blob, src.opts);
-  }, [handleImage]);
+    if (!src?.blobs?.length) return;
+    if (src.blobs.length > 1) handleDuet(src.blobs[0], src.blobs[1]);
+    else handleImage(src.blobs[0], src.opts);
+  }, [handleImage, handleDuet]);
 
   // Today's masterpiece (5.3). Resolved once, after first paint, and never
   // awaited by anything on the critical path — if it fails, the chip is
@@ -454,7 +516,7 @@ export default function App() {
             onNoteOff={noteOff}
             inkColor={settings.inkColor}
             weight={settings.weight}
-            ghostUrl={sourceUrl}
+            ghostUrls={sourceUrls}
             ghostActive={phase === 'done' && !replaying}
           />
         )}
@@ -462,7 +524,7 @@ export default function App() {
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [runId, replayId, replaying, drawSeconds, pathData, phase, handleDrawingDone,
-     sourceUrl, settings.inkColor, settings.weight]
+     sourceUrls, settings.inkColor, settings.weight]
   );
 
   return (
@@ -522,6 +584,7 @@ export default function App() {
         onRedraw={redraw}
         masterpiece={masterpiece}
         onMasterpiece={drawMasterpiece}
+        onDuet={handleDuet}
       />
       {galleryOpen && (
         <GalleryWall

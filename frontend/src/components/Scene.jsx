@@ -23,26 +23,44 @@ const LIFT_RATE = 16;    // exp smoothing rate of the lift (higher = snappier)
 
 export default function Scene({
   pathData, duration, active, onComplete, speedRef, curveRef,
-  onNoteOn, onNoteOff, inkColor, weight, ghostUrl = null, ghostActive = false,
+  onNoteOn, onNoteOff, inkColor, weight, ghostUrls = [], ghostActive = false,
 }) {
   const anim = usePathAnimation(
     pathData.points, pathData.aspect, duration, BOARD_SIZE, pathData.breaks
   );
 
+  // The gutter's world x, or null when this is an ordinary single drawing.
+  const splitWorldX = useMemo(() => {
+    const sx = pathData?.duet?.splitX;
+    if (!Number.isFinite(sx)) return null;
+    const aspect = Number(pathData.aspect) > 0 ? Number(pathData.aspect) : 1;
+    const w = aspect >= 1 ? 1 : aspect;
+    return (sx - w / 2) * BOARD_SIZE;
+  }, [pathData]);
+
   // Where the portrait lives in world space — the same normalized→world map
   // usePathAnimation applies, so the ghost reveal lands exactly under its own
   // line art (and above the caption band, which it must not cover).
-  const ghostRect = useMemo(() => {
-    const b = drawingBox(pathData);
+  const ghosts = useMemo(() => {
     const aspect = Number(pathData.aspect) > 0 ? Number(pathData.aspect) : 1;
     const w = aspect >= 1 ? 1 : aspect;
     const h = aspect >= 1 ? 1 / aspect : 1;
-    const x0 = (b.x0 - w / 2) * BOARD_SIZE;
-    const x1 = (b.x1 - w / 2) * BOARD_SIZE;
-    const y0 = (b.y0 - h / 2) * BOARD_SIZE;
-    const y1 = (b.y1 - h / 2) * BOARD_SIZE;
-    return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
-  }, [pathData]);
+    const toWorld = (b) => {
+      const x0 = (b.x0 - w / 2) * BOARD_SIZE;
+      const x1 = (b.x1 - w / 2) * BOARD_SIZE;
+      const y0 = (b.y0 - h / 2) * BOARD_SIZE;
+      const y1 = (b.y1 - h / 2) * BOARD_SIZE;
+      return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
+    };
+    // A duet reveals each photo under ITS OWN portrait; anything else gets
+    // one reveal over the whole drawing region.
+    const boxes = Array.isArray(pathData.panels) && pathData.panels.length
+      ? pathData.panels
+      : [drawingBox(pathData)];
+    return boxes
+      .map((b, i) => ({ url: ghostUrls[i] ?? null, rect: toWorld(b) }))
+      .filter((g) => g.url);
+  }, [pathData, ghostUrls]);
 
   // The single shared pen-tip position (world space, z=0 drawing plane).
   const penTip = useRef(new THREE.Vector3());
@@ -93,7 +111,15 @@ export default function Scene({
       // clock minus now) → duet mode picks violin (long) vs piano (short).
       const estDur =
         anim.strokeEnd[idx] - anim.warp(clock.current.elapsed);
-      onNoteOn?.(penTip.current.y / BOARD_SIZE + 0.5, curve, estDur);
+      // Two-photo duet (4.3): which PORTRAIT the pen is on picks the voice,
+      // so the two sitters answer each other — one bowed, one struck —
+      // instead of both being sorted by stroke length. Derived from the pen's
+      // position rather than carried per-stroke, so it survives truncation
+      // and the caption band without anything to keep in sync.
+      const panelVoice = splitWorldX === null
+        ? undefined
+        : (penTip.current.x < splitWorldX ? 'violin' : 'piano');
+      onNoteOn?.(penTip.current.y / BOARD_SIZE + 0.5, curve, estDur, panelVoice);
     } else if (active && !down && prevDown.current) {
       onNoteOff?.();
     }
@@ -130,16 +156,22 @@ export default function Scene({
 
       {/* Exact-append renderer: commits the animation's actual path vertices
           (plus a floating live-tip center), so the ink is complete and
-          frame-rate independent. maxPoints must clear the worst case:
-          dense trace at span=2 (~9.6k vertices, ≤640 strokes) PLUS a
-          full-length written caption (~4.4k vertices, ~230 letter strokes),
-          plus 2 bridge centers per stroke and the floating tip
-          ≈ 15.8k — 22 000 keeps a real margin. */}
-      {/* Behind the ink, inside the same canvas every export composites. */}
-      <GhostReveal url={ghostUrl} rect={ghostRect} active={ghostActive} />
+          frame-rate independent. maxPoints must clear the worst case, which
+          is now a two-photo DUET: two traced panels at span=2 plus a
+          full-length written caption, plus 2 bridge centers per stroke and
+          the floating tip. A duet drops each panel one detail notch (see
+          DUET_DETAIL in App.jsx) precisely so this stays bounded — at the
+          worst reachable combination that is ≈20.2k centers, where two
+          `dense` panels would need ≈25.8k. The notch-down is a correctness
+          rule, not a taste call. 26 000 keeps a real margin. */}
+      {/* Behind the ink, inside the same canvas every export composites.
+          A duet gets one reveal per panel, each under its own portrait. */}
+      {ghosts.map((g, i) => (
+        <GhostReveal key={i} url={g.url} rect={g.rect} active={ghostActive} />
+      ))}
       <InkTrail anim={anim} penTip={penTip} clockRef={clock}
                 inkColor={inkColor} weight={weight}
-                maxPoints={22000} active={active} />
+                maxPoints={26000} active={active} />
       <HandRig penTip={penTip} boardSize={BOARD_SIZE} />
     </>
   );

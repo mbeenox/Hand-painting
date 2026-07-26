@@ -394,6 +394,31 @@ with sync_playwright() as p:
     time.sleep(2)
     page.screenshot(path="e2e_9_redraw.png")
 
+    # --- Feature 4.3 "Two-photo duet": two photos → TWO parallel calls to the
+    # same endpoint → one composed path drawn in alternation. The single-photo
+    # flow above is untouched, which is why this runs last.
+    page.wait_for_selector("text=Draw another \u21ba", timeout=120000)
+    page.click("text=Draw another \u21ba")
+    page.wait_for_selector("button[aria-label^='Draw sample']", timeout=10000)
+    page.click("text=…or draw two photos as a duet ♪")
+    slots = page.query_selector_all("input[type=file]")
+    assert len(slots) == 3, f"expected 1 upload + 2 duet inputs, found {len(slots)}"
+    page.set_input_files("input[type=file] >> nth=1", "frontend/public/samples/astronaut.jpg")
+    page.set_input_files("input[type=file] >> nth=2", "frontend/public/samples/pearl.jpg")
+    duet_calls = []
+    page.on("response", lambda r: duet_calls.append(r.url)
+            if "process-image" in r.url else None)
+    page.click("text=Draw the duet ♪")
+    page.wait_for_selector("h1", state="detached", timeout=45000)
+    assert len(duet_calls) == 2, f"a duet must trace BOTH photos, saw {len(duet_calls)}"
+    # Each panel is traced one notch coarser than the viewer's setting, so the
+    # pair cannot overflow InkTrail's ribbon buffer (see DUET_DETAIL).
+    assert all("detail=fine" in u or "detail=std" in u for u in duet_calls), \
+        f"duet panels must step the detail down: {duet_calls}"
+    time.sleep(3)
+    page.screenshot(path="e2e_11_duet.png")
+    print("duet: 2 parallel traces ->", [u.split("?")[1] for u in duet_calls])
+
     browser.close()
 
 print("console/page errors:", errors if errors else "none")

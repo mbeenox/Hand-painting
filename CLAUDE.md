@@ -149,6 +149,55 @@ Hard-won deployment facts (do **not** regress):
 
 ## Revision history
 
+- **Feature 4.3 — the two-photo duet (2026-07-26)** — the flagship: two
+  portraits drawn side by side in alternation, in conversation, as one piece.
+  Two parallel calls to the SAME endpoint (no backend change), welded by
+  `lib/composeDuet.js` into a single path the rest of the app cannot tell
+  from an ordinary one — `usePathAnimation` sees one path with more breaks,
+  the gutter crossing is just a longer pen-up hop, and every export works
+  unchanged.
+  (a) **The panel is DERIVED, not carried.** The obvious design is a
+  per-stroke `panel` array, but that array would then have to be sliced by
+  `truncatePath`, extended by `appendCaption`, and kept in sync by every
+  future transform — an invariant with no enforcement. Instead the
+  composition publishes one number, `duet.splitX`, and `Scene` compares the
+  PEN'S OWN X against it at note-on. It costs one comparison and cannot fall
+  out of sync. Left portrait is bowed, right is struck — but only when the
+  viewer's Instrument setting is the default "duet"; an explicit violin-only
+  choice still wins.
+  (b) **Interleave in RUNS, not stroke-by-stroke — measured, not guessed.**
+  Alternating every stroke (560 of them) sent the composed path length from
+  ~55 to **388**: the pen spent most of the performance flying across the
+  gutter, which wrecked the pacing and skewed the Completeness dial toward
+  travel. Proportional runs (~44 crossings total) bring it to ~101, and read
+  better anyway — a person works one portrait for a few strokes, then the
+  other, and the music trades phrases instead of alternating notes. A
+  `MIN_ROUNDS` floor exists because a sparse pair otherwise collapses to
+  "draw all of A, then all of B", which truncation would then cut into one
+  finished portrait and one never started.
+  (c) **Panels share a HEIGHT, not a width**, so two different aspect ratios
+  read as a pair; and each panel is traced one notch COARSER
+  (`DUET_DETAIL`). That second point is a correctness rule, not taste: two
+  `dense` panels plus a written caption need ~25.8k ribbon centers, and
+  `InkTrail` went 22000 → **26000** with the notch-down keeping the worst
+  reachable case at ~20.2k.
+  (d) The 5.2 ghost reveal now renders ONE PLANE PER PANEL, each photo under
+  its own portrait (verified by sampling the canvas alpha in each half
+  independently: left 2.8×, right 2.4×).
+  **Rejected after measuring:** making `truncatePath` count ink only instead
+  of ink+travel. It is more principled — pen-up travel is 28–33% of a single
+  photo's path and ~50% of a duet's, so the dial is not measuring what it
+  claims — but it moves the cut by 23–43% at the SAME dial label, silently
+  redefining every stored Completeness setting and breaking the "100% = the
+  classic drawing" anchoring baseFrac was calibrated against. Left alone,
+  with the measurements recorded in the file so the next person does not
+  rediscover it the hard way.
+  Verified: `verify_duet.mjs` (composition contract, gutter separation,
+  splitX classifying every stroke, truncation keeping both portraits within
+  a few points of each other), the other three gates, `npm run build`, a
+  rendered side-by-side, and a full E2E asserting TWO traces per duet at a
+  stepped-down detail — zero console errors.
+
 - **Phase 5.3 — Today's masterpiece (2026-07-25)** — the idle screen offers
   one public-domain artwork a day, the same one for everyone on that date,
   one click from a drawing. `lib/masterpiece.js` + a curated
@@ -772,6 +821,19 @@ Hard-won deployment facts (do **not** regress):
   export. `verify_masterpiece.mjs` asserts this.
 - The daily pick must stay a pure function of the date with a coprime stride
   (not a hash), or the calendar can repeat yesterday's artwork.
+- A duet's panel must stay DERIVED from the pen's x (`duet.splitX`), never
+  carried as a per-stroke array — the array would have to be maintained by
+  truncatePath, appendCaption and everything added later.
+- Duet panels stay one detail notch COARSER than the viewer's setting. Two
+  `dense` panels plus a caption overflow InkTrail's 26000 ribbon centers and
+  the end of the drawing is silently truncated.
+- Duet strokes interleave in proportional RUNS. Stroke-by-stroke alternation
+  makes gutter travel dominate the path (measured: 55 → 388 length), and a
+  missing `MIN_ROUNDS` floor collapses sparse pairs into one portrait drawn
+  after the other.
+- `truncatePath` counts ink AND travel. That is not what the dial claims to
+  measure, but changing it shifts every stored Completeness setting by
+  23–43% — see the note in the file before touching it.
 - "Today's masterpiece" is lazy and failure-silent by contract: the list is
   fetched after first paint, and every error path returns null so the chip
   vanishes rather than blocking the idle screen.
