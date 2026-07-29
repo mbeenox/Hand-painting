@@ -149,53 +149,6 @@ Hard-won deployment facts (do **not** regress):
 
 ## Revision history
 
-- **Feature 4.2 — the wooden mannequin hand (2026-07-27)** — the procedural
-  cylinder-and-sphere arm is now a wooden ARTIST'S MANNEQUIN arm + hand: lathed
-  boxwood limb segments with subtle procedural grain, dark end-grain joint
-  balls, a brass wrist pin, a carved palm and five articulated segmented
-  fingers holding the pen in a drawing grip. Same analytic IK, same contract.
-  (a) **Authored in code (`lib/mannequinArm.js`), NOT a downloaded .glb — and
-  that is the design decision, not a fallback.** Surveyed the license-safe
-  sources first: Poly Haven's 521 CC0 models contain no rigged arm/hand
-  (props only), Sketchfab requires per-asset OAuth so licensing cannot be
-  verified programmatically, and low-poly game characters (Quaternius etc.)
-  would need Blender surgery and read flat-shaded next to the ink-bleed
-  rendering. Authoring gives exact rest-pose alignment BY CONSTRUCTION (the
-  hand-local frame has +Y up the pen shaft, tip at (0,−PEN_LENGTH,0) — the
-  same contract the old fist obeyed), zero license risk, zero network fetch,
-  no draco pipeline, no suspense/404 fallback path, and ~3 KB of code instead
-  of ~2 MB of asset. The old GLTF slot comment survives in HandRig for a
-  future real .glb; the same S/E/W solve would drive its skeleton.
-  (b) **The forearm now ends at a real WRIST, not at the grip.** The hand's
-  orientation is constant (UP→PEN_AXIS then a fixed roll), so the grip→wrist
-  vector is a CONSTANT world offset computed once; the IK target is
-  `W = G + offset` and the forearm barrel spans E→W. Costs nothing per frame
-  and stops the arm "plugging into the pen".
-  (c) **HAND_ROLL — the one parameter that made it read.** setFromUnitVectors
-  gives an arbitrary roll about the pen axis, and the default roll pointed
-  the pinky edge at the camera: the fingers hid behind the palm and the hand
-  read as an acorn (screenshot-verified). Rolling the whole hand about the
-  PEN SHAFT is tip-safe by construction, so a rendered sweep of roll angles
-  was free; −0.45 shows the articulated fingers wrapping the shaft — like
-  watching an artist across the table. Iterated via `frontend/armdev.html`
-  (dev-only harness, same camera/lights/IK as Scene, `?pos=`/`?zoom=`/
-  `?roll=` + `scripts/shoot_arm.py`) — six screenshot rounds: log-thick
-  forearm → turban palm (grain texture on spheres swirls — grain now lives
-  ONLY on the lathed limbs) → grape-cluster fingers (curls too tight, dark
-  base knuckles popping) → straighter draped fingers → roll sweep → done.
-  (d) Geometry is built ONCE in a useMemo (~45 small meshes, no per-frame
-  allocation; the solver writes the same position/quaternion/scale fields
-  the old rig wrote). Manually-built Three objects are NOT managed by R3F,
-  and the Canvas remounts on every replay, so HandRig now disposes
-  geometries/materials/texture on unmount — without it every Replay leaks
-  the whole arm.
-  Verified: build (main chunk +3 KB, no new asset), full E2E green with zero
-  console errors (ghost 39.9→17.3, webm+audio, watermark 1091 px, caption
-  4498 px, GIF 4.3 MB, replay 12.2s, drag&drop, redraw, duet 2×fine@span2),
-  all four unit gates, harness screenshots at center + 4 corners (tip on
-  crosshair everywhere, no elbow flips), and in-app screenshots mid-draw and
-  at done.
-
 - **Feature 4.3 — the two-photo duet (2026-07-26)** — the flagship: two
   portraits drawn side by side in alternation, in conversation, as one piece.
   Two parallel calls to the SAME endpoint (no backend change), welded by
@@ -800,10 +753,7 @@ Hard-won deployment facts (do **not** regress):
   which keeps facial features by construction. Still relevant for scribble
   mode, or as face-weighted `TRACE_LEVELS` (finer epsilon inside a detected
   face box).
-- ✅ **Rigged hand — DONE (Feature 4.2, 2026-07-27)** as an original wooden
-  mannequin arm authored in `lib/mannequinArm.js` (see revision history for
-  why not a .glb). The GLTF slot note in HandRig remains valid if a real
-  .glb ever materializes.
+- **Rigged hand `.glb`** in HandRig's marked GLTF slot, driven by the same IK solve.
 - ✅ **Polish — DONE (Feature #2):** processing spinner, splash fade-in reveal,
   synth pen-scratch audio + completion chime (off by default), reduced-motion.
   Remaining here: a camera ease-in. (✅ adaptive duration shipped 2026-07-24, Phase 1.)
@@ -814,17 +764,10 @@ Hard-won deployment facts (do **not** regress):
 
 ## Gotchas / don't-regress
 
-- IK pole vector must not be (anti)parallel to the shoulder→wrist direction or the
+- IK pole vector must not be (anti)parallel to the shoulder→grip direction or the
   elbow flips behind the paper (exact vectors are in `HandRig.jsx`). Arm length =
   maxReach × 1.06.
-- Limb segments are unit-height **lathe barrels** scaled to joint distance
-  (same discipline as the old unit cylinders; capsules would overshoot joints).
-- The mannequin hand's orientation is constant, which is what makes the
-  grip→wrist offset a constant world vector AND makes `HAND_ROLL` (rotation
-  about the pen shaft) the ONLY safe way to re-orient the hand — any other
-  rotation moves the pen tip off the line. Wood grain texture goes on lathed
-  limbs only (on spheres it swirls). HandRig must keep disposing the arm's
-  geometry/materials on unmount or every Replay (Canvas remount) leaks it.
+- Bones are unit **cylinders** scaled to joint distance (capsules overshoot joints).
 - `PEN_AXIS` z must stay ~0.55 or the pen foreshortens into invisibility at the camera angle.
 - The frontend must keep downscaling uploads to ≤1280 px (Vercel's 4.5 MB request-body cap).
 - **Never frame-sample the pen to decide where ink goes.** Most pen-up hops

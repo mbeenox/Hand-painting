@@ -155,7 +155,7 @@ frame time regresses).
 **Accept:** side-by-side screenshot vs current shows organic edges; 60fps
 maintained (frame-time log in E2E); exports match screen.
 
-### 4.2 Rigged realistic hand — M–L — ✅ SHIPPED 2026-07-27 as the wooden mannequin arm (authored in code, not a .glb — see CLAUDE.md)
+### 4.2 Rigged realistic hand (.glb) — M–L (mostly asset work)
 **Buys:** the single biggest "whoa" upgrade; the hand is the performer.
 **Design:** the slot already exists (`HandRig.jsx` `USE_GLTF`, documented:
 drive skeleton bones from the same S/E/G world positions the IK solve
