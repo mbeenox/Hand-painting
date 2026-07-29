@@ -149,6 +149,18 @@ Hard-won deployment facts (do **not** regress):
 
 ## Revision history
 
+- **Feature 4.2 — wooden mannequin hand: BUILT, SHIPPED, then REVERTED at the
+  owner's request (2026-07-27 → 2026-07-29).** A code-authored wooden
+  artist's-mannequin arm+hand replaced the procedural cylinder arm (commit
+  `e16aea4`, reverted in `47b1e29`). It passed every technical gate — tip
+  exactly on the line, no elbow flips, clean E2E — but the owner judged the
+  LOOK worse than the original and asked for the old hand back. If 4.2 is
+  ever attempted again: (a) recover the asset + dev harness (`armdev.html`,
+  `shoot_arm.py`, `lib/mannequinArm.js`) from `e16aea4` rather than starting
+  over — the IK/wrist/HAND_ROLL engineering was sound; the styling was the
+  problem; (b) get the owner's sign-off on a RENDERED look before wiring it
+  in — screenshots first, integration second.
+
 - **Feature 4.3 — the two-photo duet (2026-07-26)** — the flagship: two
   portraits drawn side by side in alternation, in conversation, as one piece.
   Two parallel calls to the SAME endpoint (no backend change), welded by
@@ -753,7 +765,11 @@ Hard-won deployment facts (do **not** regress):
   which keeps facial features by construction. Still relevant for scribble
   mode, or as face-weighted `TRACE_LEVELS` (finer epsilon inside a detected
   face box).
-- **Rigged hand `.glb`** in HandRig's marked GLTF slot, driven by the same IK solve.
+- **Rigged hand `.glb`** in HandRig's marked GLTF slot, driven by the same IK
+  solve. NOTE: a code-authored wooden-mannequin version was built and shipped
+  2026-07-27 but reverted 2026-07-29 — the owner didn't like the look (see
+  Revision history / commit `e16aea4`). Any retry needs owner approval of
+  rendered screenshots BEFORE integration.
 - ✅ **Polish — DONE (Feature #2):** processing spinner, splash fade-in reveal,
   synth pen-scratch audio + completion chime (off by default), reduced-motion.
   Remaining here: a camera ease-in. (✅ adaptive duration shipped 2026-07-24, Phase 1.)

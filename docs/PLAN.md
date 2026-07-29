@@ -156,6 +156,10 @@ frame time regresses).
 maintained (frame-time log in E2E); exports match screen.
 
 ### 4.2 Rigged realistic hand (.glb) — M–L (mostly asset work)
+**STATUS: attempted 2026-07-27 as a code-authored wooden mannequin (commit
+`e16aea4`), shipped, then REVERTED 2026-07-29 — owner rejected the look.
+Retry only with owner-approved rendered screenshots first. The IK/wrist
+engineering in that commit is reusable.**
 **Buys:** the single biggest "whoa" upgrade; the hand is the performer.
 **Design:** the slot already exists (`HandRig.jsx` `USE_GLTF`, documented:
 drive skeleton bones from the same S/E/G world positions the IK solve
