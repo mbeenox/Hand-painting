@@ -1,9 +1,74 @@
 """Headless E2E: upload test image through the real UI, screenshot the drawing."""
+import json
 import time
+from urllib.parse import parse_qs, urlparse
+
 from playwright.sync_api import sync_playwright
 
 errors = []
 DEDICATION = "Happy birthday, Mom"
+
+# --- Phase 5.4 share pages: everything the share flow talks to is STUBBED
+# (this sandbox's Chromium can't reach external hosts, and the vite dev
+# server has no Node function anyway). What needs testing here is OUR flow:
+# consent dialog → @vercel/blob client uploads (token POST + direct PUT) →
+# hh.create → the link in the dialog. The server half is covered by
+# frontend/scripts/verify_share.mjs against the real api/share.mjs.
+share_events = []           # "token:<pathname>" / "upload:<pathname>" / "create"
+share_create_body = {}      # the hh.create payload the app actually sent
+FAKE_BLOB_HOST = "https://e2efake.public.blob.vercel-storage.com"
+
+
+def stub_share_api(route):
+    req = route.request
+    if req.method == "GET" and "health=1" in req.url:
+        route.fulfill(body=json.dumps({"configured": True}),
+                      content_type="application/json")
+        return
+    if req.method == "POST":
+        body = req.post_data_json or {}
+        if body.get("type") == "blob.generate-client-token":
+            share_events.append("token:" + body["payload"]["pathname"])
+            route.fulfill(
+                body=json.dumps({"type": "blob.generate-client-token",
+                                 "clientToken": "vercel_blob_client_e2e_fake"}),
+                content_type="application/json")
+            return
+        if body.get("type") == "hh.create":
+            share_events.append("create")
+            share_create_body.update(body)
+            route.fulfill(
+                body=json.dumps({"id": "e2etest0aaa"[:10],
+                                 "url": "http://localhost:5173/s/e2etest0aa",
+                                 "expiresAt": "2026-08-31T00:00:00.000Z"}),
+                content_type="application/json")
+            return
+    route.fulfill(status=404, body=json.dumps({"error": "not found"}),
+                  content_type="application/json")
+
+
+def stub_blob_store(route):
+    req = route.request
+    cors = {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "*",
+        "access-control-allow-headers":
+            req.headers.get("access-control-request-headers", "*"),
+    }
+    if req.method == "OPTIONS":  # CORS preflight for the cross-origin PUT
+        route.fulfill(status=204, headers=cors)
+        return
+    pathname = parse_qs(urlparse(req.url).query).get("pathname", ["?"])[0]
+    share_events.append("upload:" + pathname)
+    route.fulfill(
+        body=json.dumps({
+            "url": f"{FAKE_BLOB_HOST}/{pathname}",
+            "downloadUrl": f"{FAKE_BLOB_HOST}/{pathname}?download=1",
+            "pathname": pathname,
+            "contentType": req.headers.get("x-content-type", "application/octet-stream"),
+            "contentDisposition": "inline",
+        }),
+        content_type="application/json", headers=cors)
 
 with sync_playwright() as p:
     browser = p.chromium.launch()
@@ -37,6 +102,10 @@ with sync_playwright() as p:
     context.route("**/upload.wikimedia.org/**", lambda route: route.fulfill(
         path="frontend/public/samples/pearl.jpg", content_type="image/jpeg",
         headers={"access-control-allow-origin": "*"}))
+    # Phase 5.4: the share endpoints (see the stub notes at the top). Routes
+    # go on the CONTEXT before the first navigation, like the wikimedia one.
+    context.route(lambda url: "/api/share" in url, stub_share_api)
+    context.route(lambda url: "vercel.com/api/blob" in url, stub_blob_store)
 
     page = context.new_page()
     page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
@@ -304,6 +373,40 @@ with sync_playwright() as p:
         "() => JSON.parse(localStorage.getItem('hh-gallery-v1') || '[]').length"
     ) == gallery_before, "replay added a spurious gallery entry"
     page.screenshot(path="e2e_7_after_replay.png")
+
+    # --- Phase 5.4 "Share pages": Share opens a CONSENT dialog (nothing
+    # uploads yet), and only "Create link" runs the stubbed pipeline: two
+    # client uploads (still + video) + one hh.create → the /s/<id> link.
+    page.click("text=Share ↗")
+    page.wait_for_selector("text=Create link 🔗", timeout=5000)
+    consent = page.inner_text("div[role='dialog']")
+    assert "never uploaded" in consent, "consent dialog must state the photo stays local"
+    assert "30 days" in consent, "consent dialog must state the retention window"
+    assert not share_events, f"nothing may upload before consent! {share_events}"
+    page.screenshot(path="e2e_12_share_consent.png")
+    page.click("text=Create link 🔗")
+    link_input = page.wait_for_selector("input[aria-label='Share link']",
+                                        timeout=20000)
+    assert link_input.input_value() == "http://localhost:5173/s/e2etest0aa", \
+        f"share link wrong: {link_input.input_value()!r}"
+    tokens = [e for e in share_events if e.startswith("token:")]
+    uploads = [e for e in share_events if e.startswith("upload:")]
+    assert any("-still.png" in e for e in uploads), f"still never uploaded: {share_events}"
+    assert any("-video." in e for e in uploads), f"video never uploaded: {share_events}"
+    assert len(tokens) == len(uploads) == 2, f"unexpected share traffic: {share_events}"
+    assert share_events[-1] == "create", f"hh.create must come last: {share_events}"
+    # The registered record: only capture outputs + style facts — and the
+    # dedication the hand wrote, which the share page shows as the title.
+    assert share_create_body["still"].startswith(FAKE_BLOB_HOST + "/shares/media/")
+    assert share_create_body["video"].startswith(FAKE_BLOB_HOST + "/shares/media/")
+    assert share_create_body["dedication"] == DEDICATION
+    assert share_create_body["strokes"] > 0 and share_create_body["w"] > 0
+    assert "sourcePhoto" not in share_create_body
+    print("share link created:", link_input.input_value(),
+          "| traffic:", share_events)
+    page.screenshot(path="e2e_13_share_done.png")
+    page.click("text=Done")
+    page.wait_for_selector("div[role='dialog']", state="detached", timeout=5000)
 
     # Feature 1.1 end-to-end: draw another → one click on a sample chip must
     # reach a live drawing (no upload dialog involved).

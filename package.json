@@ -1,0 +1,9 @@
+{
+  "name": "hypnotic-hand-root",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Root deps for the Vercel Node function api/share.mjs (Phase 5.4). The frontend has its own package.json in frontend/.",
+  "dependencies": {
+    "@vercel/blob": "2.6.1"
+  }
+}

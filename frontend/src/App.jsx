@@ -17,6 +17,7 @@ import UploadPanel from './components/UploadPanel.jsx';
 import WatercolorSplash from './components/WatercolorSplash.jsx';
 import ControlsPanel from './components/ControlsPanel.jsx';
 import GalleryWall from './components/GalleryWall.jsx';
+import ShareDialog from './components/ShareDialog.jsx';
 import { useDrawCapture } from './hooks/useDrawCapture.js';
 import { useDrawSound } from './hooks/useDrawSound.js';
 import { useGallery } from './hooks/useGallery.js';
@@ -27,6 +28,7 @@ import { appendCaption } from './lib/caption.js';
 import { loadHersheyFont } from './lib/hershey.js';
 import { todaysMasterpiece, fetchArtwork } from './lib/masterpiece.js';
 import { composeDuet } from './lib/composeDuet.js';
+import { createShareLink } from './lib/shareLink.js';
 
 const DEFAULT_SETTINGS = {
   paper: DEFAULT_PAPER, // paper stock: 'ivory' | 'noir' | 'kraft' | 'slate'
@@ -464,7 +466,9 @@ export default function App() {
     if (blob) downloadBlob(blob, 'hypnotic-hand.png');
   }, [stillBlob, snapshotPNG]);
 
-  const share = useCallback(async () => {
+  // The pre-5.4 share: hand the FILE to the OS share sheet (or download it).
+  // Kept verbatim as the fallback path inside the share dialog.
+  const shareFile = useCallback(async () => {
     const blob = stillBlob || (await snapshotPNG());
     if (!blob) return;
     const file = new File([blob], 'hypnotic-hand.png', { type: 'image/png' });
@@ -483,6 +487,29 @@ export default function App() {
 
   const shareSupported =
     typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+
+  // Share pages (5.4): the Share button now opens a consent dialog; the
+  // actual upload only happens after "Create link". ONLY capture outputs go
+  // up — the still and the recorded video — never sourceRef's photo blobs.
+  const [shareOpen, setShareOpen] = useState(false);
+  useEffect(() => { if (phase !== 'done') setShareOpen(false); }, [phase]);
+  const handleCreateLink = useCallback(async () => {
+    const blob = stillBlob || (await snapshotPNG());
+    const s = settingsRef.current;
+    return createShareLink({
+      stillBlob: blob,
+      videoUrl: video?.url ?? null,
+      videoExt: video?.ext ?? 'webm',
+      meta: {
+        dedication: pathData?.caption?.dedication || '',
+        paper: s.paper ?? DEFAULT_PAPER,
+        paperBg: getPaper(s.paper).bg,
+        duet: sourceUrls.length > 1,
+        seconds: (s.autoTime ?? true) ? autoDrawSeconds(pathData?.pathLength) : s.seconds,
+        strokes: pathData?.breaks?.length ?? 0,
+      },
+    });
+  }, [stillBlob, snapshotPNG, video, pathData, sourceUrls]);
 
   // Draw with the currently chosen style. Captured at draw start (runId/phase
   // change); ink colour is also in the deps so a finished piece recolours live.
@@ -566,7 +593,7 @@ export default function App() {
         onImage={handleImage}
         onReset={reset}
         onDownloadImage={downloadImage}
-        onShare={share}
+        onShare={() => setShareOpen(true)}
         shareSupported={shareSupported}
         videoUrl={video?.url ?? null}
         videoExt={video?.ext ?? 'webm'}
@@ -586,6 +613,15 @@ export default function App() {
         onMasterpiece={drawMasterpiece}
         onDuet={handleDuet}
       />
+      {shareOpen && phase === 'done' && (
+        <ShareDialog
+          onClose={() => setShareOpen(false)}
+          onCreateLink={handleCreateLink}
+          canShareFile={shareSupported}
+          onShareFile={shareFile}
+          hasVideo={Boolean(video?.url)}
+        />
+      )}
       {galleryOpen && (
         <GalleryWall
           paper={paper}

@@ -9,9 +9,17 @@
       "maxDuration": 30,
       "memory": 1024,
       "excludeFiles": "{**/cv2/data/**,**/numpy/tests/**,**/numpy/**/tests/**,**/*.pyi}"
+    },
+    "api/share.mjs": {
+      "maxDuration": 15
     }
   },
   "rewrites": [
+    { "source": "/s/:sid", "destination": "/api/share?sid=:sid" },
+    { "source": "/api/share-cleanup", "destination": "/api/share?cleanup=1" },
     { "source": "/api/(.*)", "destination": "/api/index" }
+  ],
+  "crons": [
+    { "path": "/api/share-cleanup", "schedule": "0 8 * * *" }
   ]
 }

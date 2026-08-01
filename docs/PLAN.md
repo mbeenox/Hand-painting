@@ -363,7 +363,19 @@ drawing; offline/API-down degrades to hiding the chip.
   the picks — each drove a new filter. Regenerating the list without looking
   at a few days' output is how they come back.
 
-## 5.4 Share pages (L) — LAST, the infrastructure step
+## 5.4 Share pages (L) — LAST, the infrastructure step — ✅ SHIPPED 2026-08-01
+**Owner decisions (2026-08-01):** 30-day retention · consent dialog required
+(states: only the finished drawing uploads, never the photo; 30-day expiry) ·
+ship on the vercel.app domain (custom domain can come later; old links keep
+working via the origin-relative watermark).
+**As built:** `api/share.mjs` (Node, beside the Python function; root
+package.json carries @vercel/blob 2.6.1) · client uploads straight to Blob
+(4.5 MB request cap makes proxying impossible) · `/s/:sid` server-rendered
+with OG tags · expiry enforced at READ time + daily cleanup cron ·
+degrades to the pre-5.4 file share when no Blob store is connected.
+**Deploy prerequisite:** connect a Vercel Blob store (dashboard → Storage)
+so BLOB_READ_WRITE_TOKEN exists. See CLAUDE.md for the full entry.
+
 **Buys:** results get URLs; the watermark finally has somewhere to point.
 **Design sketch (decisions needed before build):** Vercel Blob for the
 composited mp4/webm + still; `/api/share` POST (size-capped ~15 MB,

@@ -139,6 +139,11 @@ Hard-won deployment facts (do **not** regress):
   against the vendored font, ASCII folding, block layout, caption-band
   geometry across box shapes, and the pathData contract `appendCaption`
   owes `usePathAnimation`/`InkTrail`. Pure Node, no bundler, ~0.2 s.
+- `node frontend/scripts/verify_share.mjs` — share pages (5.4): id shape,
+  30-day retention math, the media-URL and upload-pathname gates, meta
+  sanitization (the privacy clamps), HTML escaping, rate limiting, and the
+  rendered share/expired pages (OG tags, escaped user text, report+expiry
+  lines). Needs `npm install` at the REPO ROOT first (@vercel/blob).
 
 - **Backend:** in a venv with the pinned deps, feed a synthetic edge-rich image
   (draw lines/circles with cv2) through `detect_edges → sample_points →
@@ -148,6 +153,66 @@ Hard-won deployment facts (do **not** regress):
 - **Full visual check:** deploy a preview branch on Vercel (or `npm run dev`) and draw.
 
 ## Revision history
+
+- **Phase 5.4 — share pages (2026-08-01)** — the LAST planned feature:
+  finished drawings get URLs. "Share ↗" opens a consent dialog; "Create
+  link" uploads the composited still + video to Vercel Blob and mints
+  `/s/<id>`, a server-rendered page with OG tags so the link unfurls as the
+  drawing wherever it is pasted. Owner decisions (2026-08-01): 30-day
+  retention · consent dialog required · ship on the vercel.app domain.
+  (a) **A Node function beside the Python one.** `api/share.mjs` (runtime
+  deps in the NEW ROOT `package.json`: `@vercel/blob` pinned 2.6.1) lives
+  next to `api/index.py` — Vercel matches functions by filesystem path
+  BEFORE rewrites, so `/api/share` hits the Node function while the
+  `/api/(.*)` catch-all still sends everything else to Python. New rewrites
+  put `/s/:sid` and `/api/share-cleanup` (daily cron in vercel.json) onto
+  the share function via query params.
+  (b) **Client uploads, not proxied uploads.** The media goes STRAIGHT from
+  the browser to the Blob store using @vercel/blob's client-token protocol
+  (`upload()` in the browser → token POST to `/api/share` → direct PUT).
+  Vercel's request-body cap is 4.5 MB and a 58-second video can be triple
+  that, so routing media through the function was never an option. The
+  token handler only signs pathnames matching `shares/media/<key>-still.png
+  |video.(mp4|webm)`, caps size at 15 MB, and allows only png/mp4/webm.
+  There is deliberately no `onUploadCompleted` callback: the share record
+  is created by an explicit `hh.create` POST from the client, so localhost
+  works and nothing depends on a public callback URL.
+  (c) **PRIVACY CONTRACT.** The source photo NEVER leaves the device — only
+  the app's own composited outputs (still + video) plus sanitized style
+  facts (`sanitizeMeta`: dedication ≤64 chars, paper allowlist, hex-checked
+  paperBg, clamped numbers; unknown fields dropped; media URLs must be
+  blob-store `shares/media/` HTTPS URLs). The consent dialog says exactly
+  this; any new meta field must be re-reflected in that dialog's wording.
+  (d) **Expiry is enforced at READ time, not just by the cron.** `/s/<id>`
+  checks `createdAt` and answers 410 (plus a best-effort delete) after 30
+  days, so links die on schedule even if the daily cleanup cron never
+  fires; the cron (`0 8 * * *`, optional CRON_SECRET auth) just reclaims
+  storage. IDs are 10-char base36 from webcrypto — a coprime-stride-grade
+  "don't be clever" choice: unguessable enough for semi-private links.
+  (e) **Degrades to exactly the pre-5.4 app.** No BLOB_READ_WRITE_TOKEN (or
+  the vite dev server, which has no Node functions) → `/api/share?health=1`
+  says not-configured → the dialog offers the old file-share path. Nothing
+  new lands on the first paint: the @vercel/blob client is a lazy chunk
+  (~96 KB) imported only inside "Create link".
+  **Two hard-won findings:** a cleanup-only `aliveRef` in ShareDialog is
+  React-18-StrictMode-BROKEN (dev double-mount runs the cleanup once and
+  the ref stays false forever — the link arrived and the dialog silently
+  never showed it; the effect body must re-arm the ref), and sync-Playwright
+  `time.sleep()` blocks the event loop that runs `context.route` handlers,
+  which made the stubbed share flow look hung and burned an hour of
+  debugging on phantom bugs — pump with `wait_for_selector`, never sleep,
+  when stubs must answer.
+  **Deploy prerequisite (owner, one-time):** Vercel dashboard → Storage →
+  Create Blob store → connect it to the project (injects
+  BLOB_READ_WRITE_TOKEN), then redeploy. Until then the app behaves as
+  before and the dialog says links aren't set up. Report-and-remove email
+  in `api/share.mjs` (`REPORT_EMAIL`).
+  Verified: `verify_share.mjs` (50 checks over the exported helpers), the
+  other four gates, `npm run build`, and the full E2E with the token POST,
+  blob PUT and create stubbed at the network seam — consent wording
+  asserted, ZERO uploads before consent asserted, still+video+create
+  traffic asserted, and the create payload checked for the dedication and
+  the absence of anything photo-like.
 
 - **Feature 4.2 — wooden mannequin hand: BUILT, SHIPPED, then REVERTED at the
   owner's request (2026-07-27 → 2026-07-29).** A code-authored wooden
@@ -857,3 +922,27 @@ Hard-won deployment facts (do **not** regress):
   the real pipeline, and the frame/ring/miniature/object filters exist
   because each one shipped a bad daily pick before it was added — RENDER a
   few days' picks before trusting a regenerated list.
+- **Share media must NEVER round-trip through `/api/share`** — Vercel's
+  request-body cap is 4.5 MB and videos run bigger. Client uploads only
+  (`@vercel/blob/client` `upload()`), with the pathname/size/content-type
+  gates in `onBeforeGenerateToken`.
+- **The share flow must never see the source photo.** Only `stillBlob` and
+  the recorded video go up; `sourceRef`/`sourceUrls` (the user's photo)
+  stay out of `createShareLink` and out of the meta. The consent dialog's
+  wording is a promise — keep it true.
+- `/api/share` must stay a FILESYSTEM route (api/share.mjs). It works only
+  because Vercel matches function files before applying the `/api/(.*)`
+  catch-all rewrite; renaming the file without updating the rewrites sends
+  share traffic to the Python function.
+- Share-page expiry stays enforced at read time (410 + delete in the `/s/`
+  handler). The cron is reclamation, not the contract — Hobby crons can be
+  disabled or lag, and a "deleted after 30 days" promise must not depend on
+  one.
+- Effect-scoped liveness refs must re-arm in the effect BODY
+  (`aliveRef.current = true` inside the effect, false in cleanup). React 18
+  StrictMode double-mounts in dev; a cleanup-only ref bricks the component
+  the second time and everything downstream silently no-ops.
+- In sync Playwright, `time.sleep()` starves `context.route` handlers (they
+  run on the same event loop) — any stubbed endpoint "hangs" and the bug
+  hunt goes to the wrong layer. Wait with selectors/expect_*, not sleeps,
+  whenever routes must answer during the wait.

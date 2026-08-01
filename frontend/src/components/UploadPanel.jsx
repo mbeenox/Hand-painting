@@ -265,9 +265,10 @@ export default function UploadPanel({
             <button style={styles.compact}>Save GIF ↓</button>
           </a>
         )}
-        {shareSupported && (
-          <button style={styles.compact} onClick={onShare}>Share ↗</button>
-        )}
+        {/* 5.4: Share opens the link dialog (consent → upload → /s/<id>).
+            No longer gated on navigator.share — link sharing works
+            everywhere; the OS share sheet is just one option inside. */}
+        <button style={styles.compact} onClick={onShare}>Share ↗</button>
         {/* Feature 5.2 — the two "again" buttons, next to each other on
             purpose: Replay is the SAME drawing at 4×, Redraw is the same
             photo drawn afresh (new strokes, new melody). */}
