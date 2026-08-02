@@ -184,6 +184,13 @@ with sync_playwright() as p:
     comp = page.query_selector("input[aria-label='Completeness']")
     assert comp, "Completeness slider missing"
     assert float(comp.get_attribute("value") or 0) == 1.0, "default must be 100%"
+    # Face focus row present, defaulting to Auto (user photos get it).
+    assert page.query_selector("text=Face focus · your photos"), \
+        "Face focus row missing from the Style panel"
+    ff = page.evaluate(
+        "() => JSON.parse(localStorage.getItem('hh-settings-v1') || '{}').faceFocus"
+    )
+    assert ff is not False, f"faceFocus should default on, got {ff!r}"
     page.click("text=⚙ Style")  # close the panel again
 
     # --- Feature 5.1 "the hand writes": type a dedication + ask for the
@@ -203,7 +210,17 @@ with sync_playwright() as p:
     )
     assert signed.get("signDate") is True, "Sign & date should persist to settings"
 
-    page.set_input_files("input[type=file]", "backend/test_input.png")
+    # Face focus for uploads (polish, 2026-08-01): a user UPLOAD now asks for
+    # focus=face by default — and test_input.png is synthetic (no face), so
+    # this exercises the clean no-op half of the contract: the request
+    # carries the ask, the backend focuses nothing, the drawing is plain.
+    with page.expect_response(lambda r: "process-image" in r.url,
+                              timeout=30000) as up_resp:
+        page.set_input_files("input[type=file]", "backend/test_input.png")
+    assert "focus=face" in up_resp.value.url, \
+        f"uploads should default to face focus: {up_resp.value.url}"
+    assert up_resp.value.json().get("facesFocused") in (0, None), \
+        "synthetic test image has no face — focus must no-op"
     # wait for processing → drawing (overlay disappears)
     page.wait_for_selector("h1", state="detached", timeout=30000)
     time.sleep(3)
@@ -456,7 +473,13 @@ with sync_playwright() as p:
     page.screenshot(path="e2e_6_gallery.png")
     page.click("button[aria-label='Close gallery']")
     page.wait_for_selector("h2", state="detached", timeout=5000)
-    page.click("button[aria-label^='Draw sample']")
+    # Samples are the calibration baseline — they must stay PLAIN (never
+    # refocused), no matter the Face focus setting.
+    with page.expect_response(lambda r: "process-image" in r.url,
+                              timeout=30000) as sample_resp:
+        page.click("button[aria-label^='Draw sample']")
+    assert "focus" not in sample_resp.value.url, \
+        f"samples must never be refocused: {sample_resp.value.url}"
     page.wait_for_selector("h1", state="detached", timeout=30000)
     time.sleep(3)
     page.screenshot(path="e2e_5_sample_drawing.png")
@@ -470,18 +493,27 @@ with sync_playwright() as p:
     # A photo dropped on the idle overlay goes through the same onImage path
     # as an upload. Playwright has no real drag source, so build a
     # DataTransfer from the bundled sample and dispatch what a browser would.
-    page.evaluate("""async () => {
-      const blob = await (await fetch('/samples/astronaut.jpg')).blob();
-      const file = new File([blob], 'dropped.jpg', { type: 'image/jpeg' });
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      const zone = document.querySelector('h1').parentElement;
-      for (const type of ['dragenter', 'dragover', 'drop']) {
-        zone.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true }));
-      }
-    }""")
+    with page.expect_response(lambda r: "process-image" in r.url,
+                              timeout=30000) as drop_resp:
+        page.evaluate("""async () => {
+          const blob = await (await fetch('/samples/astronaut.jpg')).blob();
+          const file = new File([blob], 'dropped.jpg', { type: 'image/jpeg' });
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          const zone = document.querySelector('h1').parentElement;
+          for (const type of ['dragenter', 'dragover', 'drop']) {
+            zone.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true }));
+          }
+        }""")
+    # A DROPPED photo is a user photo: it gets face focus, and the astronaut
+    # HAS a face — this is the focus-actually-fires half of the contract
+    # (the camera path asserts it too, but through its own source tag).
+    assert "focus=face" in drop_resp.value.url, \
+        f"dropped photos should face-focus: {drop_resp.value.url}"
+    assert drop_resp.value.json().get("facesFocused") == 1, \
+        "the astronaut's face should be found in the dropped photo"
     page.wait_for_selector("h1", state="detached", timeout=30000)
-    print("drag & drop reached a drawing")
+    print("drag & drop reached a drawing (face-focused)")
     time.sleep(2)
     page.screenshot(path="e2e_8_dropped.png")
     page.wait_for_selector("text=Draw another \u21ba", timeout=120000)

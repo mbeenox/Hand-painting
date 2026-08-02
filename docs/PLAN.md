@@ -379,6 +379,10 @@ so BLOB_READ_WRITE_TOKEN exists. ✅ Done 2026-08-01 (store
 LIVE in production end-to-end. See CLAUDE.md for the full entry.
 
 ## Polish log
+- ✅ **Face focus for uploads (2026-08-01)** — user photos (upload / drop /
+  camera / duet slots) get the camera's face-priority treatment behind a
+  persisted "Face focus · your photos" Auto/Off toggle (default Auto).
+  Samples + masterpiece stay plain (calibration baselines). See CLAUDE.md.
 - ✅ **Narrow-phone fit for wide drawings (2026-08-01)** — `fitBoardSize()`
   shrinks the board so wide compositions (duets most of all) fit a portrait
   phone's visible width instead of overflowing it. Frozen per run; the arm

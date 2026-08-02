@@ -167,7 +167,7 @@ export default function UploadPanel({
     setDragging(false);
     const file = Array.from(e.dataTransfer?.files ?? [])
       .find((f) => f.type.startsWith('image/'));
-    if (file) onImage(file);
+    if (file) onImage(file, { source: 'upload' });
   }, [onImage]);
 
   // Same-origin fetch → blob → the normal upload pipeline. No backend change.
@@ -175,14 +175,14 @@ export default function UploadPanel({
     try {
       const res = await fetch(src);
       if (!res.ok) throw new Error(`sample HTTP ${res.status}`);
-      onImage(await res.blob());
+      onImage(await res.blob(), { source: 'sample' });
     } catch {
       console.warn('Sample image unavailable:', src);
     }
   }, [onImage]);
   const onFile = (e) => {
     const f = e.target.files?.[0];
-    if (f) onImage(f);
+    if (f) onImage(f, { source: 'upload' });
     e.target.value = ''; // allow re-uploading the same file
   };
 
@@ -241,10 +241,11 @@ export default function UploadPanel({
     canvas.getContext('2d').drawImage(video, 0, 0);
     stopCamera();
     // toBlob → binary PNG buffer, same multipart pipeline as file upload.
-    // Camera shots ask the backend for FACE FOCUS: detected faces keep full
-    // detail while the (usually busy) background is blurred away, so the
-    // stroke budget goes to the portrait, not the bookshelf behind it.
-    canvas.toBlob((blob) => blob && onImage(blob, { focus: 'face' }), 'image/png', 0.95);
+    // The `source` tag is the App's face-focus policy input: user photos
+    // (camera + uploads) get FACE FOCUS while the toggle is on — detected
+    // faces keep full detail while the (usually busy) background is blurred
+    // away, so the stroke budget goes to the portrait, not the bookshelf.
+    canvas.toBlob((blob) => blob && onImage(blob, { source: 'camera' }), 'image/png', 0.95);
   }, [onImage, stopCamera]);
 
   if (phase === 'drawing') return null; // stay out of the way while drawing

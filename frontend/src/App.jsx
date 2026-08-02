@@ -42,6 +42,7 @@ const DEFAULT_SETTINGS = {
   instrument: 'duet', // 'duet' | 'violin' | 'piano' → stroke-music voice
   mood: 'dawn',  // 'dawn' | 'dusk' | 'sakura' | 'hymn' → key/drone/character
   completeness: 1.0, // how far the artist goes (0.3–2.0; 1.0 = classic full)
+  faceFocus: true, // faces in YOUR photos keep full detail, backgrounds soften
   signDate: false, // "Sign & date": the hand signs the piece when it's done
   scratch: false, // pen-scratch (nib-on-paper) sound when 🔊 is on — OFF by default
   sound: true,   // master 🔊 toggle — the show performs its music by default
@@ -66,6 +67,14 @@ const REPLAY_MIN_S = 4;
 // 26k ceiling once a written caption is added, which would silently truncate
 // the end of the drawing.
 const DUET_DETAIL = { dense: 'std', std: 'fine', fine: 'fine' };
+
+// Face focus for user photos (polish, 2026-08-01). Only photos the USER
+// brings get the face-priority treatment (and only while settings.faceFocus
+// is on): the bundled samples are the pipeline's calibration baseline, and
+// the masterpiece list was VETTED through the plain pipeline — silently
+// refocusing either would redefine what those calibrations measured.
+// Photos without a detectable face are a clean backend no-op either way.
+const USER_PHOTO_SOURCES = new Set(['upload', 'camera']);
 
 const AUTO_PACE_UPS = 1.6; // path units per second
 const AUTO_MIN_S = 20;
@@ -268,9 +277,16 @@ export default function App() {
     if (soundOnRef.current) setSoundEnabled(true);
     setPhase('processing');
     try {
+      // Face focus is a POLICY decision made here, per draw, from the
+      // CURRENT setting — so a Redraw after flipping the toggle honours the
+      // flip (sourceRef keeps the blob + its source tag, not the verdict).
+      const focus =
+        (settingsRef.current.faceFocus ?? true) &&
+        (USER_PHOTO_SOURCES.has(opts.source) || opts.focus === 'face')
+          ? 'face' : 'none';
       const data = await processImage(
         fileOrBlob, settingsRef.current.detail, settingsRef.current.mode,
-        opts.focus ?? 'none'
+        focus
       );
       // Completeness dial: strokes arrive in artist passes (contours →
       // structure → details), so cutting the tail leaves a coherent,
@@ -301,9 +317,12 @@ export default function App() {
     try {
       const s = settingsRef.current;
       const detail = DUET_DETAIL[s.detail] ?? 'fine';
+      // Duet slots are always the user's own photos → same face-focus
+      // policy as a single upload (and the same no-op when no face).
+      const focus = (s.faceFocus ?? true) ? 'face' : 'none';
       const [a, b] = await Promise.all([
-        processImage(blobA, detail, s.mode),
-        processImage(blobB, detail, s.mode),
+        processImage(blobA, detail, s.mode, focus),
+        processImage(blobB, detail, s.mode, focus),
       ]);
       const composed = composeDuet(a, b);
       if (!composed) throw new Error('Neither photo could be traced.');
@@ -356,7 +375,7 @@ export default function App() {
   const drawMasterpiece = useCallback(async () => {
     if (!masterpiece) return;
     try {
-      handleImage(await fetchArtwork(masterpiece));
+      handleImage(await fetchArtwork(masterpiece), { source: 'masterpiece' });
     } catch (e) {
       console.warn('Could not fetch today’s masterpiece.', e);
       setError('Could not reach today’s masterpiece — try a photo instead.');

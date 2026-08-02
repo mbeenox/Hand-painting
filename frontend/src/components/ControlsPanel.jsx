@@ -197,6 +197,21 @@ beyond it the pen keeps going into the finest detail it can find"
           </div>
 
           <div style={ui.row}>
+            <span style={ui.label}>Face focus · your photos</span>
+            <div style={ui.seg}>
+              {[[true, 'Auto'], [false, 'Off']].map(([v, lbl]) => (
+                <button key={lbl} style={ui.segBtn((settings.faceFocus ?? true) === v)}
+                  title={v
+                    ? 'A face found in your uploaded or camera photo keeps full detail while the background softens to whispers. Photos without a face are untouched; samples and the daily masterpiece are never refocused.'
+                    : 'Draw your photos exactly as they are, background and all'}
+                  onClick={() => onChange({ faceFocus: v })}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={ui.row}>
             <span style={ui.label}>Pen scratch · with 🔊 on</span>
             <div style={ui.seg}>
               {[[true, 'On'], [false, 'Off']].map(([v, lbl]) => (

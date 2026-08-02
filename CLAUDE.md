@@ -154,6 +154,33 @@ Hard-won deployment facts (do **not** regress):
 
 ## Revision history
 
+- **Polish — face focus for uploads (2026-08-01)** — the face-priority
+  treatment camera snaps have had since 07-24 now covers every photo the
+  USER brings: file upload, drag & drop, and both duet slots (each panel
+  independently), behind a persisted Style toggle "Face focus · your
+  photos" (Auto/Off, `settings.faceFocus`, default ON — no settings
+  migration needed; loadSettings' defaults-merge covers old stores).
+  How it's wired, and why this shape:
+  (a) **Call sites tag the SOURCE; App decides the policy.** UploadPanel
+  passes `{source: 'upload'|'camera'|'sample'}` (masterpiece tags itself);
+  `handleImage` derives `focus` from the source tag + the CURRENT setting.
+  The verdict is never stored — `sourceRef` keeps the blob and its tag, so
+  a Redraw after flipping the toggle honours the flip.
+  (b) **Samples and the daily masterpiece are NEVER refocused.** The two
+  bundled samples are the pipeline's calibration baseline (edge-density
+  band, duet measurements) and the 182-work masterpiece list was VETTED
+  through the plain pipeline — silently refocusing either would redefine
+  what those calibrations measured. `USER_PHOTO_SOURCES` in App.jsx is the
+  single place this policy lives.
+  (c) Photos without a detectable face are the backend's existing clean
+  no-op (`face_focus()` finds nothing → untouched pipeline), so turning
+  the feature on by default does not change landscapes, pets, buildings.
+  Verified in the E2E from both directions: the synthetic upload asserts
+  `focus=face` requested + `facesFocused: 0` (no-op half); the dropped
+  astronaut asserts `focus=face` + `facesFocused: 1` (fires half); the
+  sample draw asserts NO focus param; duet URLs carry focus; the camera
+  path's original assertions are unchanged.
+
 - **Polish — narrow-phone fit for wide drawings (2026-08-01)** — the camera
   is fixed (z=11, fov 40): ~8.007 world units of visible HEIGHT, and
   8.007 × viewport aspect of WIDTH. BOARD_SIZE=8 fills the height
@@ -971,6 +998,12 @@ Hard-won deployment facts (do **not** regress):
   run on the same event loop) — any stubbed endpoint "hangs" and the bug
   hunt goes to the wrong layer. Wait with selectors/expect_*, not sleeps,
   whenever routes must answer during the wait.
+- Face focus policy lives in ONE place (`USER_PHOTO_SOURCES` +
+  `handleImage`/`handleDuet` in App.jsx), keyed on source TAGS from the
+  call sites. Samples and the masterpiece stay plain — they are calibrated
+  baselines; refocusing them silently redefines the calibration. Don't
+  store the focus verdict with the source; derive it per draw so Redraw
+  follows the current toggle.
 - The fitted board must stay FROZEN for the lifetime of a Canvas mount
   (`boardRef` in Scene.jsx). Re-mapping worldPoints on live resize corrupts
   the centers InkTrail already committed. And HandRig must keep the
