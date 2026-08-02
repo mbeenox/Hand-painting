@@ -374,7 +374,15 @@ package.json carries @vercel/blob 2.6.1) · client uploads straight to Blob
 with OG tags · expiry enforced at READ time + daily cleanup cron ·
 degrades to the pre-5.4 file share when no Blob store is connected.
 **Deploy prerequisite:** connect a Vercel Blob store (dashboard → Storage)
-so BLOB_READ_WRITE_TOKEN exists. See CLAUDE.md for the full entry.
+so BLOB_READ_WRITE_TOKEN exists. ✅ Done 2026-08-01 (store
+`hand-painting-blob`, public, read-write token env var) — links verified
+LIVE in production end-to-end. See CLAUDE.md for the full entry.
+
+## Polish log
+- ✅ **Narrow-phone fit for wide drawings (2026-08-01)** — `fitBoardSize()`
+  shrinks the board so wide compositions (duets most of all) fit a portrait
+  phone's visible width instead of overflowing it. Frozen per run; the arm
+  stays full-size. See CLAUDE.md.
 
 **Buys:** results get URLs; the watermark finally has somewhere to point.
 **Design sketch (decisions needed before build):** Vercel Blob for the

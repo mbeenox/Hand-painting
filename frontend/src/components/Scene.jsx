@@ -9,7 +9,7 @@
  * so there is exactly one source of truth and zero per-frame allocation.
  */
 import React, { useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import HandRig from './HandRig.jsx';
 import InkTrail from './InkTrail.jsx';
@@ -21,12 +21,45 @@ export const BOARD_SIZE = 8; // world units spanned by the drawing's longest sid
 const PEN_LIFT = 0.42;   // how high (world z) the pen rises on pen-up hops
 const LIFT_RATE = 16;    // exp smoothing rate of the lift (higher = snappier)
 
+// --- Fit-to-viewport (the narrow-phone crop fix) ------------------------
+// The camera is fixed (z=11, fov 40): it always shows ~8.007 world units of
+// HEIGHT, and 8.007 × the viewport aspect of WIDTH. BOARD_SIZE=8 fills the
+// height edge-to-edge, which is fine for width on any landscape screen —
+// but a WIDE composition on a PORTRAIT phone (a duet is ~2:1; even a single
+// portrait is ~0.75 wide) used to overflow the ~3.7 visible units and get
+// silently cropped at both sides. The fix: shrink the drawing's board just
+// enough that its width also fits, with a small breathing margin.
+const CAM_VISIBLE_H = 8.007; // 2·11·tan(40°/2) — keep in sync with the Canvas camera
+const FIT_MARGIN = 0.96;     // don't kiss the screen edges
+
+export function fitBoardSize(viewportAspect, drawingAspect) {
+  const a = Number(drawingAspect) > 0 ? Number(drawingAspect) : 1;
+  const w = a >= 1 ? 1 : a; // normalized drawing width (long side = 1)
+  const va = Number.isFinite(viewportAspect) && viewportAspect > 0 ? viewportAspect : 1;
+  const visW = CAM_VISIBLE_H * va * FIT_MARGIN;
+  return Math.min(BOARD_SIZE, visW / w);
+}
+
 export default function Scene({
   pathData, duration, active, onComplete, speedRef, curveRef,
   onNoteOn, onNoteOff, inkColor, weight, ghostUrls = [], ghostActive = false,
 }) {
+  // The board size for THIS run, FROZEN at mount on purpose: the Canvas
+  // remounts every run/replay (runId/replayId in its key), so each drawing
+  // fits the screen it starts on — while a mid-draw window resize does NOT
+  // re-map worldPoints, which would corrupt the world-space centers
+  // InkTrail has already committed to its append-only buffer.
+  const { size } = useThree();
+  const boardRef = useRef(0);
+  if (!boardRef.current) {
+    boardRef.current = fitBoardSize(
+      size.width / Math.max(1, size.height), pathData.aspect
+    );
+  }
+  const board = boardRef.current;
+
   const anim = usePathAnimation(
-    pathData.points, pathData.aspect, duration, BOARD_SIZE, pathData.breaks
+    pathData.points, pathData.aspect, duration, board, pathData.breaks
   );
 
   // The gutter's world x, or null when this is an ordinary single drawing.
@@ -35,8 +68,8 @@ export default function Scene({
     if (!Number.isFinite(sx)) return null;
     const aspect = Number(pathData.aspect) > 0 ? Number(pathData.aspect) : 1;
     const w = aspect >= 1 ? 1 : aspect;
-    return (sx - w / 2) * BOARD_SIZE;
-  }, [pathData]);
+    return (sx - w / 2) * board;
+  }, [pathData, board]);
 
   // Where the portrait lives in world space — the same normalized→world map
   // usePathAnimation applies, so the ghost reveal lands exactly under its own
@@ -46,10 +79,10 @@ export default function Scene({
     const w = aspect >= 1 ? 1 : aspect;
     const h = aspect >= 1 ? 1 / aspect : 1;
     const toWorld = (b) => {
-      const x0 = (b.x0 - w / 2) * BOARD_SIZE;
-      const x1 = (b.x1 - w / 2) * BOARD_SIZE;
-      const y0 = (b.y0 - h / 2) * BOARD_SIZE;
-      const y1 = (b.y1 - h / 2) * BOARD_SIZE;
+      const x0 = (b.x0 - w / 2) * board;
+      const x1 = (b.x1 - w / 2) * board;
+      const y0 = (b.y0 - h / 2) * board;
+      const y1 = (b.y1 - h / 2) * board;
       return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: x1 - x0, h: y1 - y0 };
     };
     // A duet reveals each photo under ITS OWN portrait; anything else gets
@@ -60,7 +93,7 @@ export default function Scene({
     return boxes
       .map((b, i) => ({ url: ghostUrls[i] ?? null, rect: toWorld(b) }))
       .filter((g) => g.url);
-  }, [pathData, ghostUrls]);
+  }, [pathData, ghostUrls, board]);
 
   // The single shared pen-tip position (world space, z=0 drawing plane).
   const penTip = useRef(new THREE.Vector3());
@@ -119,7 +152,9 @@ export default function Scene({
       const panelVoice = splitWorldX === null
         ? undefined
         : (penTip.current.x < splitWorldX ? 'violin' : 'piano');
-      onNoteOn?.(penTip.current.y / BOARD_SIZE + 0.5, curve, estDur, panelVoice);
+      // Pitch by the stroke's height on the (possibly fit-scaled) board, so
+      // a phone drawing plays the same melody as the desktop one.
+      onNoteOn?.(penTip.current.y / board + 0.5, curve, estDur, panelVoice);
     } else if (active && !down && prevDown.current) {
       onNoteOff?.();
     }
@@ -172,6 +207,12 @@ export default function Scene({
       <InkTrail anim={anim} penTip={penTip} clockRef={clock}
                 inkColor={inkColor} weight={weight}
                 maxPoints={26000} active={active} />
+      {/* The ARM stays sized to the constant BOARD_SIZE on purpose: its
+          shoulder sits just off the bottom screen edge (-0.68·8 ≈ -5.4 vs
+          the ±4.0 the camera shows), and scaling it with a fit-shrunk board
+          would drag the shoulder ON screen. A full-size hand drawing a
+          smaller sheet also simply reads right — its reach covers the
+          shrunken board because that board is a subset of the ±4 square. */}
       <HandRig penTip={penTip} boardSize={BOARD_SIZE} />
     </>
   );

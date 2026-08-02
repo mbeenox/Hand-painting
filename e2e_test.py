@@ -522,6 +522,54 @@ with sync_playwright() as p:
     page.screenshot(path="e2e_11_duet.png")
     print("duet: 2 parallel traces ->", [u.split("?")[1] for u in duet_calls])
 
+    # --- Narrow-phone fit (polish, 2026-08-01): a duet is the widest
+    # composition the app makes (~2:1). Before the fit fix, BOARD_SIZE=8
+    # filled the camera's HEIGHT unconditionally, so on a portrait phone
+    # (~3.7 visible units of width) both panels overflowed the screen and
+    # were silently cropped. Draw a duet in a phone-sized context and
+    # measure where ink actually lands on the WebGL canvas (the buffer
+    # exports composite): it must clear the outer edges and reach BOTH
+    # halves — two whole portraits, on screen, with margins.
+    phone = browser.new_context(viewport={"width": 390, "height": 844})
+    phone.route("**/upload.wikimedia.org/**", lambda route: route.fulfill(
+        path="frontend/public/samples/pearl.jpg", content_type="image/jpeg",
+        headers={"access-control-allow-origin": "*"}))
+    pp = phone.new_page()
+    pp.on("pageerror", lambda e: errors.append("phone: " + str(e)))
+    pp.goto("http://localhost:5173", wait_until="networkidle")
+    pp.click("text=…or draw two photos as a duet ♪")
+    pp.set_input_files("input[type=file] >> nth=1", "frontend/public/samples/astronaut.jpg")
+    pp.set_input_files("input[type=file] >> nth=2", "frontend/public/samples/pearl.jpg")
+    pp.click("text=Draw the duet ♪")
+    pp.wait_for_selector("h1", state="detached", timeout=45000)
+    pp.wait_for_selector("text=Draw another ↺", timeout=120000)
+    time.sleep(1)
+    cols = pp.evaluate("""() => {
+      const gl = document.querySelector('canvas');
+      const W = 130, H = 64;
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(gl, 0, 0, W, H);
+      const d = ctx.getImageData(0, 0, W, H).data;
+      const col = new Array(W).fill(0);
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) col[x] += d[(y * W + x) * 4 + 3];
+      return col;
+    }""")
+    W = len(cols)
+    thresh = max(cols) * 0.01
+    first = next(i for i, v in enumerate(cols) if v > thresh)
+    last = W - 1 - next(i for i, v in enumerate(reversed(cols)) if v > thresh)
+    print(f"phone duet ink columns: {first}..{last} of {W}")
+    assert first >= 1 and last <= W - 2, \
+        f"drawing bleeds to the screen edge — still cropped? cols {first}..{last}"
+    left_ink = sum(cols[: int(W * 0.4)])
+    right_ink = sum(cols[int(W * 0.6):])
+    assert left_ink > 0 and right_ink > 0, \
+        f"a duet panel is missing on the phone: L={left_ink} R={right_ink}"
+    pp.screenshot(path="e2e_14_phone_duet.png")
+    phone.close()
+
     browser.close()
 
 print("console/page errors:", errors if errors else "none")

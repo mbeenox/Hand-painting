@@ -154,6 +154,31 @@ Hard-won deployment facts (do **not** regress):
 
 ## Revision history
 
+- **Polish — narrow-phone fit for wide drawings (2026-08-01)** — the camera
+  is fixed (z=11, fov 40): ~8.007 world units of visible HEIGHT, and
+  8.007 × viewport aspect of WIDTH. BOARD_SIZE=8 fills the height
+  unconditionally, which overflows a portrait phone's ~3.7 visible units of
+  width for any wide composition — a duet (~2:1) lost BOTH panels off the
+  sides; even a single 3:4 portrait was clipped. Fix: `fitBoardSize()` in
+  `Scene.jsx` shrinks the drawing's board just enough that its width also
+  fits (FIT_MARGIN 0.96); desktop aspect ratios resolve to the full 8 and
+  are pixel-identical. Two deliberate choices:
+  (a) **The board is FROZEN per mount.** The Canvas remounts every
+  run/replay, so each drawing fits the screen it starts on — but a mid-draw
+  resize does NOT re-map worldPoints, which would corrupt the world-space
+  centers InkTrail has already committed to its append-only buffer.
+  Rotating a phone mid-draw keeps the starting fit; the next draw refits.
+  (b) **The ARM does not scale.** HandRig keeps the constant BOARD_SIZE:
+  its shoulder sits just off the bottom screen edge (-0.68·8 ≈ -5.4 vs the
+  ±4.0 shown), and scaling it with the board would drag the shoulder ON
+  screen. A full-size hand drawing a smaller sheet reads naturally, and its
+  reach covers the shrunken board (a subset of the ±4 square). The
+  note-pitch mapping divides by the FITTED board, so a phone drawing plays
+  the same melody as the desktop one.
+  Verified: E2E gained a phone-context duet (390×844) that measures per-
+  column ink on the WebGL canvas — margins clear at both edges, ink in both
+  halves; the desktop suite is byte-identical green.
+
 - **Phase 5.4 — share pages (2026-08-01)** — the LAST planned feature:
   finished drawings get URLs. "Share ↗" opens a consent dialog; "Create
   link" uploads the composited still + video to Vercel Blob and mints
@@ -946,3 +971,9 @@ Hard-won deployment facts (do **not** regress):
   run on the same event loop) — any stubbed endpoint "hangs" and the bug
   hunt goes to the wrong layer. Wait with selectors/expect_*, not sleeps,
   whenever routes must answer during the wait.
+- The fitted board must stay FROZEN for the lifetime of a Canvas mount
+  (`boardRef` in Scene.jsx). Re-mapping worldPoints on live resize corrupts
+  the centers InkTrail already committed. And HandRig must keep the
+  CONSTANT BOARD_SIZE — a shoulder scaled to a fit-shrunk board lands ON
+  screen. `CAM_VISIBLE_H` (8.007) is derived from the Canvas camera
+  (z=11, fov 40); change one, change both.
